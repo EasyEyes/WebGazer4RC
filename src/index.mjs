@@ -44,7 +44,7 @@ var latestEyeFeatures = null;
 var latestGazeData = null;
 var paused = false;
 //registered callback for loop
-var nopCallback = function(data, time) {};
+var nopCallback = function(data) {};
 var callback = nopCallback;
 
 //Types that regression systems should handle
@@ -163,9 +163,9 @@ function checkEyesInValidationBox() {
     //the validation box then the box border turns green, otherwise if
     //the eyes are outside of the box the colour is red
     if (xPositions && yPositions){
-      faceFeedbackBox.style.border = 'solid green';
+      faceFeedbackBox.style.border = 'solid gray 2px';
     } else {
-      faceFeedbackBox.style.border = 'solid red';
+      faceFeedbackBox.style.border =  'solid red 4px';
     }
   }
   else
@@ -277,8 +277,7 @@ async function loop() {
     // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
     latestGazeData = getPrediction();
     // Count time
-    var elapsedTime = performance.now() - clockStart;
-
+    // var elapsedTime = performance.now() - clockStart;
 
     // Draw face overlay
     if( webgazer.params.showFaceOverlay )
@@ -297,7 +296,7 @@ async function loop() {
     latestGazeData = await latestGazeData;
 
     // [20200623 xk] callback to function passed into setGazeListener(fn)
-    callback(latestGazeData, elapsedTime);
+    callback(latestGazeData);
 
     if( latestGazeData ) {
       // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
@@ -310,7 +309,7 @@ async function loop() {
         y += smoothingVals.get(d).y;
       }
 
-      var pred = webgazer.util.bound({'x':x/len, 'y':y/len});
+      var pred = webgazer.util.bound({x:x/len, y:y/len});
 
       if (webgazer.params.storingPoints) {
         drawCoordinates('blue',pred.x,pred.y); //draws the previous predictions
@@ -322,13 +321,15 @@ async function loop() {
         }
       }
       // GazeDot
-      if (webgazer.params.showGazeDot) {
-        gazeDot.style.display = 'block';
-      }
-      gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
-    } else {
-      gazeDot.style.display = 'none';
+      // if (webgazer.params.showGazeDot) {
+      //   gazeDot.style.display = 'block';
+      // }
+      // gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
+      gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
     }
+    // else {
+    //   gazeDot.style.display = 'none';
+    // }
 
     requestAnimationFrame(loop);
   }
@@ -472,8 +473,6 @@ async function init(stream) {
   //////////////////////////
   // Video and video preview
   //////////////////////////
-  var topDist = '0px'
-  var leftDist = '0px'
 
   // used for webgazer.stopVideo() and webgazer.setCameraConstraints()
   videoStream = stream;
@@ -482,9 +481,9 @@ async function init(stream) {
   videoContainerElement = document.createElement('div');
   videoContainerElement.id = webgazer.params.videoContainerId;
   videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
-  videoContainerElement.style.position = 'fixed';
-  videoContainerElement.style.top = topDist;
-  videoContainerElement.style.left = leftDist;
+  // videoContainerElement.style.position = 'fixed';
+  // videoContainerElement.style.top = topDist;
+  // videoContainerElement.style.left = leftDist;
   videoContainerElement.style.width = webgazer.params.videoViewerWidth + 'px';
   videoContainerElement.style.height = webgazer.params.videoViewerHeight + 'px';
   
@@ -498,7 +497,6 @@ async function init(stream) {
   // We set these to stop the video appearing too large when it is added for the very first time
   videoElement.style.width = webgazer.params.videoViewerWidth + 'px';
   videoElement.style.height = webgazer.params.videoViewerHeight + 'px';
-  // videoElement.style.zIndex="-1";
 
   // Canvas for drawing video to pass to clm tracker
   videoElementCanvas = document.createElement('canvas');
@@ -541,11 +539,11 @@ async function init(stream) {
   gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
   gazeDot.style.position = 'fixed';
   gazeDot.style.zIndex = 99999;
-  gazeDot.style.left = '-5px'; //'-999em';
-  gazeDot.style.top  = '-5px';
+  gazeDot.style.left = '-15px'; // Off-screen at first
+  gazeDot.style.top  = '-15px';
   gazeDot.style.background = 'red';
   gazeDot.style.borderRadius = '100%';
-  gazeDot.style.opacity = '0.7';
+  gazeDot.style.opacity = '0.5';
   gazeDot.style.width = '10px';
   gazeDot.style.height = '10px';
 
@@ -1046,6 +1044,7 @@ webgazer.addRegression = function(name) {
 /**
  * Sets a callback to be executed on every gaze event (currently all time steps)
  * @param {function} listener - The callback function to call (it must be like function(data, elapsedTime))
+ * - No elapsedTime needed for Toolbox
  * @return {webgazer} this
  */
 webgazer.setGazeListener = function(listener) {

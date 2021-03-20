@@ -249,22 +249,14 @@ util.resizeEye = function(eye, resizeWidth, resizeHeight) {
  * @return {Array} constrained coordinates
  */
 util.bound = function(prediction){
-    if(prediction.x < 0)
-        prediction.x = 0;
-    if(prediction.y < 0)
-        prediction.y = 0;
-    var w = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-    var h = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
-    if(prediction.x > w){
-        prediction.x = w;
-    }
-
-    if(prediction.y > h)
-    {
-        prediction.y = h;
-    }
-    return prediction;
+    prediction.x = _constrain(prediction.x, 0, Math.max(document.documentElement.clientWidth, window.innerWidth || 0));
+    prediction.y = _constrain(prediction.y, 0, Math.max(document.documentElement.clientHeight, window.innerHeight || 0));
+    return prediction
 };
+
+function _constrain(a, b0, b1) {
+    return a < b0 ? b0 : a > b1 ? b1 : a
+}
 
 /**
  * Write statistics in debug paragraph panel
