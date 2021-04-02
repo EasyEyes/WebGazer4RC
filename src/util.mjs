@@ -1,4 +1,4 @@
-import mat from './mat';
+import mat from './mat.mjs';
 
 const util = {};
 

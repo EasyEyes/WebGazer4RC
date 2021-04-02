@@ -1,7 +1,7 @@
 import numeric from 'numeric';
-import mat from './mat';
-import util from './util';
-import params from './params';
+import mat from './mat.mjs';
+import util from './util.mjs';
+import params from './params.mjs';
 
 const reg = {};
 var ridgeParameter = Math.pow(10,-5);

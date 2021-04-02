@@ -1,13 +1,13 @@
 import '@tensorflow/tfjs';
 import 'regression';
-import params from './params';
-import './dom_util';
+import params from './params.mjs';
+import './dom_util.mjs';
 import localforage from 'localforage';
-import TFFaceMesh from './facemesh';
-import Reg from './ridgeReg';
-import ridgeRegWeighted from './ridgeWeightedReg';
-import ridgeRegThreaded from './ridgeRegThreaded';
-import util from './util';
+import TFFaceMesh from './facemesh.mjs';
+import Reg from './ridgeReg.mjs';
+import ridgeRegWeighted from './ridgeWeightedReg.mjs';
+import ridgeRegThreaded from './ridgeRegThreaded.mjs';
+import util from './util.mjs';
 
 const webgazer = {};
 webgazer.tracker = {};
@@ -537,15 +537,15 @@ async function init(stream) {
   gazeDot = document.createElement('div');
   gazeDot.id = webgazer.params.gazeDotId;
   gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
-  gazeDot.style.position = 'fixed';
-  gazeDot.style.zIndex = 99999;
+  // gazeDot.style.position = 'fixed';
+  // gazeDot.style.zIndex = 99999;
   gazeDot.style.left = '-15px'; // Off-screen at first
   gazeDot.style.top  = '-15px';
-  gazeDot.style.background = 'red';
-  gazeDot.style.borderRadius = '100%';
-  gazeDot.style.opacity = '0.5';
-  gazeDot.style.width = '10px';
-  gazeDot.style.height = '10px';
+  // gazeDot.style.background = 'red';
+  // gazeDot.style.borderRadius = '100%';
+  // gazeDot.style.opacity = '0.5';
+  // gazeDot.style.width = '10px';
+  // gazeDot.style.height = '10px';
 
   // Add other preview/feedback elements to the screen once the video has shown and its parameters are initialized
   videoContainerElement.appendChild(videoElement);

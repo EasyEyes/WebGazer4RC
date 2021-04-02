@@ -1,7 +1,7 @@
-import mat from './mat';
-import util from './util';
+import mat from './mat.mjs';
+import util from './util.mjs';
 import numeric from 'numeric';
-import params from './params';
+import params from './params.mjs';
 
 const reg = {};
 

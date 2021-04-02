@@ -1,6 +1,6 @@
 import numeric from 'numeric';
-import util from './util';
-import params from './params';
+import util from './util.mjs';
+import params from './params.mjs';
 
 const reg = {};
 
