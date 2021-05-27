@@ -1,7 +1,7 @@
-import util from './util';
+import util from './util.mjs';
 import numeric from 'numeric';
-import mat from './mat';
-import params from './params';
+import mat from './mat.mjs';
+import params from './params.mjs';
 
 const util_regression = {};
 

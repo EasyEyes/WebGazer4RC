@@ -1,5 +1,5 @@
-import mat from './mat';
-import params from './params';
+import mat from './mat.mjs';
+import params from './params.mjs';
 import numeric from 'numeric';
 
 const util = {};
