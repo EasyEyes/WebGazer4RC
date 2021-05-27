@@ -1,4 +1,7 @@
 import '@tensorflow/tfjs';
+//import(/* webpackPreload: true */ '@tensorflow/tfjs');
+//import(/* webpackChunkName: 'pageA' */ './vendors~main.js')
+
 import 'regression';
 import params from './params.mjs';
 import './dom_util.mjs';
@@ -259,7 +262,7 @@ async function getPrediction(regModelIndex) {
 /**
  * Runs every available animation frame if webgazer is not paused
  */
-var smoothingVals = new webgazer.util.DataWindow(4);
+var smoothingVals = new util.DataWindow(4);
 var k = 0;
 
 async function loop() {
@@ -309,7 +312,7 @@ async function loop() {
         y += smoothingVals.get(d).y;
       }
 
-      var pred = webgazer.util.bound({x:x/len, y:y/len});
+      var pred = util.bound({'x':x/len, 'y':y/len});
 
       if (webgazer.params.storingPoints) {
         drawCoordinates('blue',pred.x,pred.y); //draws the previous predictions
@@ -367,7 +370,7 @@ var recordScreenPosition = function(x, y, eventType) {
 var clickListener = async function(event) {
   recordScreenPosition(event.clientX, event.clientY, eventTypes[0]); // eventType[0] === 'click'
 
-  if (window.saveDataAcrossSessions) {
+  if (webgazer.params.saveDataAcrossSessions) {
     // Each click stores the next data point into localforage.
     await setGlobalData();
 
@@ -620,7 +623,7 @@ webgazer.begin = function(onFail) {
   }
 
   // Load model data stored in localforage.
-  if (window.saveDataAcrossSessions) {
+  if (webgazer.params.saveDataAcrossSessions) {
     loadGlobalData();
   }
 
@@ -811,6 +814,20 @@ webgazer.showPredictionPoints = function(val) {
 };
 
 /**
+ * Set whether localprevious calibration data (from localforage) should be loaded.
+ * Default true.
+ * 
+ * NOTE: Should be called before webgazer.begin() -- see www/js/main.js for example
+ * 
+ * @param val 
+ * @returns {webgazer} this
+ */
+webgazer.saveDataAcrossSessions = function(val) {
+  webgazer.params.saveDataAcrossSessions = val;
+  return webgazer;
+}
+
+/**
  * Set whether a Kalman filter will be applied to gaze predictions (default true);
  * @return {webgazer} this
  */
@@ -937,24 +954,12 @@ webgazer.removeMouseEventListeners = function() {
  *  Records current screen position for current pupil features.
  *  @param {String} x - position on screen in the x axis
  *  @param {String} y - position on screen in the y axis
- *  @return {webgazer} this
- */
-webgazer.recordScreenPosition = function(x, y) {
-  // give this the same weight that a click gets.
-  recordScreenPosition(x, y, eventTypes[0]);
-  return webgazer;
-};
-
-/**
- *  Records current screen position for current pupil features.
- *  @param {String} x - position on screen in the x axis
- *  @param {String} y - position on screen in the y axis
  *  @param {String} eventType - "click" or "move", as per eventTypes
  *  @return {webgazer} this
  */
 webgazer.recordScreenPosition = function(x, y, eventType) {
   // give this the same weight that a click gets.
-  recordScreenPosition(x, y, eventType);
+  recordScreenPosition(x, y, eventType || eventTypes[0]);
   return webgazer;
 };
 
@@ -1067,6 +1072,7 @@ webgazer.clearGazeListener = function() {
  */
 webgazer.setVideoElementCanvas = function(canvas) {
   videoElementCanvas = canvas;
+  return videoElementCanvas;
 }
 
 /**
@@ -1098,8 +1104,8 @@ webgazer.getRegression = function() {
  * Requests an immediate prediction
  * @return {object} prediction data object
  */
-webgazer.getCurrentPrediction = function() {
-  return getPrediction();
+webgazer.getCurrentPrediction = function(regIndex) {
+  return getPrediction(regIndex);
 };
 
 /**
