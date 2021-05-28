@@ -1,3 +1,5 @@
+// Search LOOP for the loop function.
+
 import '@tensorflow/tfjs';
 //import(/* webpackPreload: true */ '@tensorflow/tfjs');
 //import(/* webpackChunkName: 'pageA' */ './vendors~main.js')
@@ -49,6 +51,9 @@ var paused = false;
 //registered callback for loop
 var nopCallback = function(data) {};
 var callback = nopCallback;
+
+let predicting = false // Prediction
+let learning = false // Regression
 
 //Types that regression systems should handle
 //Describes the source of data so that regression systems may ignore or handle differently the various generating events
@@ -172,7 +177,7 @@ function checkEyesInValidationBox() {
     }
   }
   else
-    faceFeedbackBox.style.border = 'solid black';
+    faceFeedbackBox.style.border = 'solid gray 2px';
 }
 
 /**
@@ -259,6 +264,10 @@ async function getPrediction(regModelIndex) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                    LOOP                                    */
+/* -------------------------------------------------------------------------- */
+
 /**
  * Runs every available animation frame if webgazer is not paused
  */
@@ -266,8 +275,7 @@ var smoothingVals = new util.DataWindow(4);
 var k = 0;
 
 async function loop() {
-  if (!paused) {
-
+  if (webgazer.params.videoIsOn) {
     // [20200617 XK] TODO: there is currently lag between the camera input and the face overlay. This behavior
     // is not seen in the facemesh demo. probably need to optimize async implementation. I think the issue lies
     // in the implementation of getPrediction().
@@ -276,11 +284,6 @@ async function loop() {
     // [20180729 JT] Why do we need to do this? clmTracker does this itself _already_, which is just duplicating the work.
     // Is it because other trackers need a canvas instead of an img/video element?
     paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
-
-    // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
-    latestGazeData = getPrediction();
-    // Count time
-    // var elapsedTime = performance.now() - clockStart;
 
     // Draw face overlay
     if( webgazer.params.showFaceOverlay )
@@ -295,44 +298,54 @@ async function loop() {
     // Check that the eyes are inside of the validation box
     if( webgazer.params.showFaceFeedbackBox )
       checkEyesInValidationBox();
+  }
 
-    latestGazeData = await latestGazeData;
+  if (!paused) {
 
-    // [20200623 xk] callback to function passed into setGazeListener(fn)
-    callback(latestGazeData);
+    if (predicting) {
+      // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
+      latestGazeData = getPrediction();
+      // Count time
+      // var elapsedTime = performance.now() - clockStart;
 
-    if( latestGazeData ) {
-      // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
-      smoothingVals.push(latestGazeData);
-      var x = 0;
-      var y = 0;
-      var len = smoothingVals.length;
-      for (var d in smoothingVals.data) {
-        x += smoothingVals.get(d).x;
-        y += smoothingVals.get(d).y;
-      }
+      latestGazeData = await latestGazeData;
 
-      var pred = util.bound({'x':x/len, 'y':y/len});
+      // [20200623 xk] callback to function passed into setGazeListener(fn)
+      callback(latestGazeData);
 
-      if (webgazer.params.storingPoints) {
-        drawCoordinates('blue',pred.x,pred.y); //draws the previous predictions
-        //store the position of the past fifty occuring tracker preditions
-        webgazer.storePoints(pred.x, pred.y, k);
-        k++;
-        if (k == 50) {
-          k = 0;
+      if( latestGazeData ) {
+        // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
+        smoothingVals.push(latestGazeData);
+        var x = 0;
+        var y = 0;
+        var len = smoothingVals.length;
+        for (var d in smoothingVals.data) {
+          x += smoothingVals.get(d).x;
+          y += smoothingVals.get(d).y;
         }
+
+        var pred = util.bound({'x':x/len, 'y':y/len});
+
+        if (webgazer.params.storingPoints) {
+          drawCoordinates('blue',pred.x,pred.y); //draws the previous predictions
+          //store the position of the past fifty occuring tracker preditions
+          webgazer.storePoints(pred.x, pred.y, k);
+          k++;
+          if (k == 50) {
+            k = 0;
+          }
+        }
+        // GazeDot
+        // if (webgazer.params.showGazeDot) {
+        //   gazeDot.style.display = 'block';
+        // }
+        // gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
+        gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
       }
-      // GazeDot
-      // if (webgazer.params.showGazeDot) {
-      //   gazeDot.style.display = 'block';
+      // else {
+      //   gazeDot.style.display = 'none';
       // }
-      // gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
-      gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
     }
-    // else {
-    //   gazeDot.style.display = 'none';
-    // }
 
     requestAnimationFrame(loop);
   }
@@ -472,110 +485,117 @@ function clearData() {
  * Initializes all needed dom elements and begins the loop
  * @param {URL} stream - The video stream to use
  */
-async function init(stream) {
+async function init(stream, videoOnly = false) {
   //////////////////////////
   // Video and video preview
   //////////////////////////
 
-  // used for webgazer.stopVideo() and webgazer.setCameraConstraints()
-  videoStream = stream;
+  if (!webgazer.params.videoIsOn) {
+    // used for webgazer.stopVideo() and webgazer.setCameraConstraints()
+    videoStream = stream;
 
-  // create a video element container to enable customizable placement on the page
-  videoContainerElement = document.createElement('div');
-  videoContainerElement.id = webgazer.params.videoContainerId;
-  videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
-  // videoContainerElement.style.position = 'fixed';
-  // videoContainerElement.style.top = topDist;
-  // videoContainerElement.style.left = leftDist;
-  videoContainerElement.style.width = webgazer.params.videoViewerWidth + 'px';
-  videoContainerElement.style.height = webgazer.params.videoViewerHeight + 'px';
-  
-  videoElement = document.createElement('video');
-  videoElement.setAttribute('playsinline', '');
-  videoElement.id = webgazer.params.videoElementId;
-  videoElement.srcObject = stream;
-  videoElement.autoplay = true;
-  videoElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
-  videoElement.style.position = 'absolute';
-  // We set these to stop the video appearing too large when it is added for the very first time
-  videoElement.style.width = webgazer.params.videoViewerWidth + 'px';
-  videoElement.style.height = webgazer.params.videoViewerHeight + 'px';
+    // create a video element container to enable customizable placement on the page
+    videoContainerElement = document.createElement('div');
+    videoContainerElement.id = webgazer.params.videoContainerId;
+    videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
+    // videoContainerElement.style.position = 'fixed';
+    // videoContainerElement.style.top = topDist;
+    // videoContainerElement.style.left = leftDist;
+    videoContainerElement.style.width = webgazer.params.videoViewerWidth + 'px';
+    videoContainerElement.style.height = webgazer.params.videoViewerHeight + 'px';
 
-  // Canvas for drawing video to pass to clm tracker
-  videoElementCanvas = document.createElement('canvas');
-  videoElementCanvas.id = webgazer.params.videoElementCanvasId;
-  videoElementCanvas.style.display = 'none';
+    videoElement = document.createElement('video');
+    videoElement.setAttribute('playsinline', '');
+    videoElement.id = webgazer.params.videoElementId;
+    videoElement.srcObject = stream;
+    videoElement.autoplay = true;
+    videoElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
+    videoElement.style.position = 'absolute';
+    // We set these to stop the video appearing too large when it is added for the very first time
+    videoElement.style.width = webgazer.params.videoViewerWidth + 'px';
+    videoElement.style.height = webgazer.params.videoViewerHeight + 'px';
 
-  // Face overlay
-  // Shows the CLM tracking result
-  faceOverlay = document.createElement('canvas');
-  faceOverlay.id = webgazer.params.faceOverlayId;
-  faceOverlay.style.display = webgazer.params.showFaceOverlay ? 'block' : 'none';
-  faceOverlay.style.position = 'absolute';
+    // Canvas for drawing video to pass to clm tracker
+    videoElementCanvas = document.createElement('canvas');
+    videoElementCanvas.id = webgazer.params.videoElementCanvasId;
+    videoElementCanvas.style.display = 'none';
 
-  // Mirror video feed
-  if (webgazer.params.mirrorVideo) {
-    videoElement.style.setProperty("-moz-transform", "scale(-1, 1)");
-    videoElement.style.setProperty("-webkit-transform", "scale(-1, 1)");
-    videoElement.style.setProperty("-o-transform", "scale(-1, 1)");
-    videoElement.style.setProperty("transform", "scale(-1, 1)");
-    videoElement.style.setProperty("filter", "FlipH");
-    faceOverlay.style.setProperty("-moz-transform", "scale(-1, 1)");
-    faceOverlay.style.setProperty("-webkit-transform", "scale(-1, 1)");
-    faceOverlay.style.setProperty("-o-transform", "scale(-1, 1)");
-    faceOverlay.style.setProperty("transform", "scale(-1, 1)");
-    faceOverlay.style.setProperty("filter", "FlipH");
+    // Face overlay
+    // Shows the CLM tracking result
+    faceOverlay = document.createElement('canvas');
+    faceOverlay.id = webgazer.params.faceOverlayId;
+    faceOverlay.style.display = webgazer.params.showFaceOverlay ? 'block' : 'none';
+    faceOverlay.style.position = 'absolute';
+
+    // Mirror video feed
+    if (webgazer.params.mirrorVideo) {
+      videoElement.style.setProperty("-moz-transform", "scale(-1, 1)");
+      videoElement.style.setProperty("-webkit-transform", "scale(-1, 1)");
+      videoElement.style.setProperty("-o-transform", "scale(-1, 1)");
+      videoElement.style.setProperty("transform", "scale(-1, 1)");
+      videoElement.style.setProperty("filter", "FlipH");
+      faceOverlay.style.setProperty("-moz-transform", "scale(-1, 1)");
+      faceOverlay.style.setProperty("-webkit-transform", "scale(-1, 1)");
+      faceOverlay.style.setProperty("-o-transform", "scale(-1, 1)");
+      faceOverlay.style.setProperty("transform", "scale(-1, 1)");
+      faceOverlay.style.setProperty("filter", "FlipH");
+    }
+
+    // Feedback box
+    // Lets the user know when their face is in the middle
+    faceFeedbackBox = document.createElement('canvas');
+    faceFeedbackBox.id = webgazer.params.faceFeedbackBoxId;
+    faceFeedbackBox.style.display = webgazer.params.showFaceFeedbackBox ? 'block' : 'none';
+    faceFeedbackBox.style.border = 'solid gray 2px';
+    faceFeedbackBox.style.position = 'absolute';
+
+    // Add other preview/feedback elements to the screen once the video has shown and its parameters are initialized
+    videoContainerElement.appendChild(videoElement);
+    document.body.appendChild(videoContainerElement);
+    function setupPreviewVideo(e) {
+
+      // All video preview parts have now been added, so set the size both internally and in the preview window.
+      setInternalVideoBufferSizes( videoElement.videoWidth, videoElement.videoHeight );
+      webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight );
+
+      videoContainerElement.appendChild(videoElementCanvas);
+      webgazer.videoCanvas = videoElementCanvas // !
+      videoContainerElement.appendChild(faceOverlay);
+      videoContainerElement.appendChild(faceFeedbackBox);
+
+      // Run this only once, so remove the event listener
+      e.target.removeEventListener(e.type, setupPreviewVideo);
+    };
+    videoElement.addEventListener('timeupdate', setupPreviewVideo);
   }
 
-  // Feedback box
-  // Lets the user know when their face is in the middle
-  faceFeedbackBox = document.createElement('canvas');
-  faceFeedbackBox.id = webgazer.params.faceFeedbackBoxId;
-  faceFeedbackBox.style.display = webgazer.params.showFaceFeedbackBox ? 'block' : 'none';
-  faceFeedbackBox.style.border = 'solid';
-  faceFeedbackBox.style.position = 'absolute';
+  if (!videoOnly) {
+    // Gaze dot
+    // Starts offscreen
+    gazeDot = document.createElement('div');
+    gazeDot.id = webgazer.params.gazeDotId;
+    gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
+    // gazeDot.style.position = 'fixed';
+    // gazeDot.style.zIndex = 99999;
+    gazeDot.style.left = '-15px'; // Off-screen at first
+    gazeDot.style.top  = '-15px';
+    // gazeDot.style.background = 'red';
+    // gazeDot.style.borderRadius = '100%';
+    // gazeDot.style.opacity = '0.5';
+    // gazeDot.style.width = '10px';
+    // gazeDot.style.height = '10px';
 
-  // Gaze dot
-  // Starts offscreen
-  gazeDot = document.createElement('div');
-  gazeDot.id = webgazer.params.gazeDotId;
-  gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
-  // gazeDot.style.position = 'fixed';
-  // gazeDot.style.zIndex = 99999;
-  gazeDot.style.left = '-15px'; // Off-screen at first
-  gazeDot.style.top  = '-15px';
-  // gazeDot.style.background = 'red';
-  // gazeDot.style.borderRadius = '100%';
-  // gazeDot.style.opacity = '0.5';
-  // gazeDot.style.width = '10px';
-  // gazeDot.style.height = '10px';
-
-  // Add other preview/feedback elements to the screen once the video has shown and its parameters are initialized
-  videoContainerElement.appendChild(videoElement);
-  document.body.appendChild(videoContainerElement);
-  function setupPreviewVideo(e) {
-
-    // All video preview parts have now been added, so set the size both internally and in the preview window.
-    setInternalVideoBufferSizes( videoElement.videoWidth, videoElement.videoHeight );
-    webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight );
-
-    videoContainerElement.appendChild(videoElementCanvas);
-    videoContainerElement.appendChild(faceOverlay);
-    videoContainerElement.appendChild(faceFeedbackBox);
     document.body.appendChild(gazeDot);
 
-    // Run this only once, so remove the event listener
-    e.target.removeEventListener(e.type, setupPreviewVideo);
-  };
-  videoElement.addEventListener('timeupdate', setupPreviewVideo);
+    addMouseEventListeners();
 
-  addMouseEventListeners();
+    //BEGIN CALLBACK LOOP
+    paused = false;
+    predicting = true;
+    clockStart = performance.now();
 
-  //BEGIN CALLBACK LOOP
-  paused = false;
-  clockStart = performance.now();
-
-  await loop();
+    await loop();
+  }
 }
 
 /**
@@ -623,30 +643,66 @@ webgazer.begin = function(onFail) {
   }
 
   // Load model data stored in localforage.
-  if (webgazer.params.saveDataAcrossSessions) {
-    loadGlobalData();
-  }
+  // if (webgazer.params.saveDataAcrossSessions) {
+  //   loadGlobalData();
+  // }
 
   onFail = onFail || function() {console.log('No stream')};
 
-  if (debugVideoLoc) {
-    init(debugVideoLoc);
-    return webgazer;
-  }
+  // if (debugVideoLoc) {
+  //   init(debugVideoLoc);
+  //   return webgazer;
+  // }
 
   ///////////////////////
   // SETUP VIDEO ELEMENTS
   // Sets .mediaDevices.getUserMedia depending on browser
-  setUserMediaVariable();
+  // setUserMediaVariable();
 
   // Request webcam access under specific constraints
   // WAIT for access
+  // return new Promise(async (resolve, reject) => {
+  //   let stream;
+  //   try {
+  //     stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
+  //     init(stream);
+  //     resolve(webgazer);
+  //   } catch(err) {
+  //     onFail();
+  //     videoElement = null;
+  //     stream = null;
+  //     reject(err);
+  //   }
+  // });
+
+  if (webgazer.params.videoIsOn) {
+    return webgazer
+  }
+
+  return webgazer._begin(false)
+};
+
+/**
+ * Start the video element.
+ */
+webgazer.beginVideo = function () {
+  webgazer._begin(true)
+}
+
+webgazer._begin = function (videoOnly) {
+  // SETUP VIDEO ELEMENTS
+  // Sets .mediaDevices.getUserMedia depending on browser
+  setUserMediaVariable();
+
   return new Promise(async (resolve, reject) => {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-      init(stream);
-      resolve(webgazer);
+      init(stream, videoOnly);
+      //
+      webgazer.params.videoIsOn = true
+      //
+      if (!videoOnly) resolve(webgazer);
     } catch(err) {
       onFail();
       videoElement = null;
@@ -654,8 +710,7 @@ webgazer.begin = function(onFail) {
       reject(err);
     }
   });
-};
-
+}
 
 /**
  * Checks if webgazer has finished initializing after calling begin()
