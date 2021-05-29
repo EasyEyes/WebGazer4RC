@@ -186,8 +186,8 @@ function checkEyesInValidationBox() {
  * @param {x} x - The x co-ordinate of the desired point to plot
  * @param {y} y - The y co-ordinate of the desired point to plot
  */
-function drawCoordinates(colour,x,y){
-  var ctx = document.getElementById("plotting_canvas").getContext('2d');
+function drawCoordinates(colour, x, y) {
+  var ctx = document.getElementById("gaze-accuracy-canvas").getContext('2d');
   ctx.fillStyle = colour; // Red color
   ctx.beginPath();
   ctx.arc(x, y, 5, 0, Math.PI * 2, true);
@@ -327,8 +327,8 @@ async function loop() {
         var pred = util.bound({'x':x/len, 'y':y/len});
 
         if (webgazer.params.storingPoints) {
-          drawCoordinates('blue',pred.x,pred.y); //draws the previous predictions
-          //store the position of the past fifty occuring tracker preditions
+          // drawCoordinates('blue', pred.x, pred.y); //draws the previous predictions
+          // store the position of the past fifty occuring tracker preditions
           webgazer.storePoints(pred.x, pred.y, k);
           k++;
           if (k == 50) {
