@@ -36,6 +36,8 @@
   "dependencies": {
     "@tensorflow-models/facemesh": "^0.0.5",
     "@tensorflow/tfjs": "^3.6.0",
+    "@tensorflow/tfjs-converter": "^2.8.6",
+    "@tensorflow/tfjs-core": "^2.8.6",
     "localforage": "1.7.3",
     "numeric": "1.2.6",
     "regression": "2.0.1"
