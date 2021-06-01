@@ -1,3 +1,4 @@
+/* eslint-disable */
 // Search LOOP for the loop function.
 
 import '@tensorflow/tfjs';
@@ -220,10 +221,10 @@ function getPupilFeatures(canvas, width, height) {
  * @param {Number} height - the new height of the canvas
  */
 function paintCurrentFrame(canvas, width, height) {
-  if (canvas.width != width) {
+  if (canvas.width !== width) {
     canvas.width = width;
   }
-  if (canvas.height != height) {
+  if (canvas.height !== height) {
     canvas.height = height;
   }
 
@@ -286,18 +287,16 @@ async function loop() {
     paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 
     // Draw face overlay
-    if( webgazer.params.showFaceOverlay )
-    {
+    if (webgazer.params.showFaceOverlay) {
       // Get tracker object
       var tracker = webgazer.getTracker();
-      faceOverlay.getContext('2d').clearRect( 0, 0, videoElement.videoWidth, videoElement.videoHeight);
+      faceOverlay.getContext('2d').clearRect(0, 0, videoElement.videoWidth, videoElement.videoHeight);
       tracker.drawFaceOverlay(faceOverlay.getContext('2d'), tracker.getPositions());
     }
 
     // Feedback box
     // Check that the eyes are inside of the validation box
-    if( webgazer.params.showFaceFeedbackBox )
-      checkEyesInValidationBox();
+    if (webgazer.params.showFaceFeedbackBox) checkEyesInValidationBox();
   }
 
   if (!paused) {
@@ -346,9 +345,9 @@ async function loop() {
       //   gazeDot.style.display = 'none';
       // }
     }
-
-    requestAnimationFrame(loop);
   }
+
+  requestAnimationFrame(loop);
 }
 
 //is problematic to test
@@ -557,7 +556,7 @@ async function init(stream, videoOnly = false) {
       // All video preview parts have now been added, so set the size both internally and in the preview window.
       setInternalVideoBufferSizes( videoElement.videoWidth, videoElement.videoHeight );
       webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight );
-
+ 
       videoContainerElement.appendChild(videoElementCanvas);
       webgazer.videoCanvas = videoElementCanvas // !
       videoContainerElement.appendChild(faceOverlay);
@@ -593,9 +592,9 @@ async function init(stream, videoOnly = false) {
     paused = false;
     predicting = true;
     clockStart = performance.now();
-
-    await loop();
   }
+
+  await loop();
 }
 
 /**
