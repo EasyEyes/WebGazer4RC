@@ -21,12 +21,7 @@
     "/src"
   ],
   "husky": {
-    "hooks": {
-      "pre-commit": "npm run build && git add www/webgazer.js",
-      "post-checkout": "yarnhook && npm --prefix ./www install ./www/ && npm run build",
-      "post-merge": "yarnhook && npm --prefix ./www install ./www/ && npm run build",
-      "post-rewrite": "yarnhook && npm --prefix ./www install ./www/ && npm run build"
-    }
+    "hooks": {}
   },
   "keywords": [
     "webgazer",
