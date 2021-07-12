@@ -179,15 +179,15 @@ util.equalizeHistogram = function(src, step, dst) {
     // Compute integral histogram:
     var norm = 255 * step / srcLength,
         prev = 0;
-    for (var i = 0; i < 256; ++i) {
-        var h = hist[i];
+    for (var j = 0; j < 256; ++j) {
+        var h = hist[j];
         prev = h += prev;
-        hist[i] = h * norm; // For non-integer src: ~~(h * norm + 0.5);
+        hist[j] = h * norm; // For non-integer src: ~~(h * norm + 0.5);
     }
 
     // Equalize image:
-    for (var i = 0; i < srcLength; ++i) {
-        dst[i] = hist[src[i]];
+    for (var k = 0; k < srcLength; ++k) {
+        dst[k] = hist[src[k]];
     }
     return dst;
 };
@@ -244,13 +244,13 @@ util.resizeEye = function(eye, resizeWidth, resizeHeight) {
  * @return {Array} constrained coordinates
  */
 util.bound = function(prediction){
-    prediction.x = _constrain(prediction.x, 0, Math.max(document.documentElement.clientWidth, window.innerWidth || 0));
-    prediction.y = _constrain(prediction.y, 0, Math.max(document.documentElement.clientHeight, window.innerHeight || 0));
+    prediction.x = _constrain(prediction.x, 0, window.innerWidth);
+    prediction.y = _constrain(prediction.y, 0, window.innerHeight);
     return prediction
 };
 
 function _constrain(a, b0, b1) {
-    return a < b0 ? b0 : a > b1 ? b1 : a
+    return (a < b0) ? b0 : (a > b1) ? b1 : a
 }
 
 //not used !?

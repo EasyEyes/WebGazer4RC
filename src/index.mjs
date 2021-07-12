@@ -53,7 +53,6 @@ var paused = false;
 var nopCallback = function(data) {};
 var callback = nopCallback;
 
-let predicting = false // Prediction
 let learning = false // Regression
 
 //Types that regression systems should handle
@@ -275,7 +274,12 @@ async function getPrediction(regModelIndex) {
 var smoothingVals = new util.DataWindow(4);
 var k = 0;
 
+let _now = null
+let _last = -1
+
 async function loop() {
+  _now = window.performance.now()
+
   if (webgazer.params.videoIsOn) {
     // [20200617 XK] TODO: there is currently lag between the camera input and the face overlay. This behavior
     // is not seen in the facemesh demo. probably need to optimize async implementation. I think the issue lies
@@ -301,7 +305,8 @@ async function loop() {
 
   if (!paused) {
 
-    if (predicting) {
+    if (_now - _last >= 1000. / webgazer.params.framerate) {
+
       // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
       latestGazeData = getPrediction();
       // Count time
@@ -323,16 +328,14 @@ async function loop() {
           y += smoothingVals.get(d).y;
         }
 
-        var pred = util.bound({'x':x/len, 'y':y/len});
+        var pred = util.bound({ x: x / len, y: y / len });
 
         if (webgazer.params.storingPoints) {
           // drawCoordinates('blue', pred.x, pred.y); //draws the previous predictions
           // store the position of the past fifty occuring tracker preditions
-          webgazer.storePoints(pred.x, pred.y, k);
-          k++;
-          if (k == 50) {
-            k = 0;
-          }
+          webgazer.storePoints(pred.x, pred.y, k)
+          ++k
+          if (k == 50) k = 0
         }
         // GazeDot
         // if (webgazer.params.showGazeDot) {
@@ -341,10 +344,12 @@ async function loop() {
         // gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
         gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
       }
-      // else {
-      //   gazeDot.style.display = 'none';
-      // }
+
+      _last = _now
+
     }
+  } else {
+    gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
   }
 
   requestAnimationFrame(loop);
@@ -484,7 +489,7 @@ function clearData() {
  * Initializes all needed dom elements and begins the loop
  * @param {URL} stream - The video stream to use
  */
-async function init(stream, videoOnly = false) {
+async function init(initMode = 'all', stream) {
   //////////////////////////
   // Video and video preview
   //////////////////////////
@@ -568,7 +573,7 @@ async function init(stream, videoOnly = false) {
     videoElement.addEventListener('timeupdate', setupPreviewVideo);
   }
 
-  if (!videoOnly) {
+  if (initMode != 'video') {
     // Gaze dot
     // Starts offscreen
     gazeDot = document.createElement('div');
@@ -576,8 +581,12 @@ async function init(stream, videoOnly = false) {
     gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
     // gazeDot.style.position = 'fixed';
     // gazeDot.style.zIndex = 99999;
-    gazeDot.style.left = '-15px'; // Off-screen at first
-    gazeDot.style.top  = '-15px';
+    // TODO Customizable width and height
+    gazeDot.style.width = '10px'
+    gazeDot.style.height = '10px'
+    gazeDot.style.left = '-5px';
+    gazeDot.style.top  = '-5px'; // Width and height are 10px by default
+    gazeDot.style.transform = `translate(-15px, -15px)`
     // gazeDot.style.background = 'red';
     // gazeDot.style.borderRadius = '100%';
     // gazeDot.style.opacity = '0.5';
@@ -590,7 +599,6 @@ async function init(stream, videoOnly = false) {
 
     //BEGIN CALLBACK LOOP
     paused = false;
-    predicting = true;
     clockStart = performance.now();
   }
 
@@ -674,9 +682,9 @@ webgazer.begin = function(onFail) {
   //   }
   // });
 
-  if (webgazer.params.videoIsOn) {
-    return webgazer
-  }
+  // if (webgazer.params.videoIsOn) {
+  //   return webgazer
+  // }
 
   return webgazer._begin(false)
 };
@@ -691,24 +699,31 @@ webgazer.beginVideo = function () {
 webgazer._begin = function (videoOnly) {
   // SETUP VIDEO ELEMENTS
   // Sets .mediaDevices.getUserMedia depending on browser
-  setUserMediaVariable();
+  if (!webgazer.params.videoIsOn) {
+    setUserMediaVariable();
 
-  return new Promise(async (resolve, reject) => {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-      init(stream, videoOnly);
-      //
-      webgazer.params.videoIsOn = true
-      //
-      if (!videoOnly) resolve(webgazer);
-    } catch(err) {
-      onFail();
-      videoElement = null;
-      stream = null;
-      reject(err);
-    }
-  });
+    return new Promise(async (resolve, reject) => {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
+        init(videoOnly ? 'video' : 'all', stream);
+        //
+        webgazer.params.videoIsOn = true
+        //
+        if (!videoOnly) resolve(webgazer);
+      } catch(err) {
+        console.log(err);
+        onFail();
+        videoElement = null;
+        stream = null;
+        reject(err);
+      }
+    });
+  } else {
+    // Video is ON
+    // e.g. tracking viewing distance already
+    init('gaze')
+  }
 }
 
 /**
@@ -731,6 +746,16 @@ webgazer.pause = function() {
   paused = true;
   return webgazer;
 };
+
+webgazer.stopLearning = function () {
+  removeMouseEventListeners()
+  return webgazer
+}
+
+webgazer.startLearning = function () {
+  addMouseEventListeners()
+  return webgazer
+}
 
 /**
  * Resumes collection of data and predictions if paused
