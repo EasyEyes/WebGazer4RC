@@ -48,8 +48,10 @@ var yPast50 = new Array(50);
 var clockStart = performance.now();
 var latestEyeFeatures = null;
 var latestGazeData = null;
-var paused = false;
-//registered callback for loop
+/* -------------------------------------------------------------------------- */
+webgazer.params.paused = false;
+/* -------------------------------------------------------------------------- */
+// registered callback for loop
 var nopCallback = function(data) {};
 var callback = nopCallback;
 
@@ -303,9 +305,10 @@ async function loop() {
     if (webgazer.params.showFaceFeedbackBox) checkEyesInValidationBox();
   }
 
-  if (!paused) {
+  if (!webgazer.params.paused) {
 
     if (_now - _last >= 1000. / webgazer.params.framerate) {
+      _last = _now
 
       // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
       latestGazeData = getPrediction();
@@ -345,8 +348,6 @@ async function loop() {
         gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
       }
 
-      _last = _now
-
     }
   } else {
     gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
@@ -367,7 +368,7 @@ async function loop() {
  * @returns {null}
  */
 var recordScreenPosition = function(x, y, eventType) {
-  if (paused) {
+  if (webgazer.params.paused) {
     return;
   }
   if (regs.length === 0) {
@@ -401,7 +402,7 @@ var clickListener = async function(event) {
  * @param {Event} event - The listened event
  */
 var moveListener = function(event) {
-  if (paused) {
+  if (webgazer.params.paused) {
     return;
   }
 
@@ -598,7 +599,7 @@ async function init(initMode = 'all', stream) {
     addMouseEventListeners();
 
     //BEGIN CALLBACK LOOP
-    paused = false;
+    webgazer.params.paused = false;
     clockStart = performance.now();
   }
 
@@ -645,9 +646,9 @@ function setUserMediaVariable(){
  * @returns {*}
  */
 webgazer.begin = function(onFail) {
-  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.chrome){
-    alert("WebGazer works only over https. If you are doing local development, you need to run a local server.");
-  }
+  // if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.chrome){
+  //   alert("WebGazer works only over https. If you are doing local development, you need to run a local server.");
+  // }
 
   // Load model data stored in localforage.
   // if (webgazer.params.saveDataAcrossSessions) {
@@ -660,27 +661,6 @@ webgazer.begin = function(onFail) {
   //   init(debugVideoLoc);
   //   return webgazer;
   // }
-
-  ///////////////////////
-  // SETUP VIDEO ELEMENTS
-  // Sets .mediaDevices.getUserMedia depending on browser
-  // setUserMediaVariable();
-
-  // Request webcam access under specific constraints
-  // WAIT for access
-  // return new Promise(async (resolve, reject) => {
-  //   let stream;
-  //   try {
-  //     stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-  //     init(stream);
-  //     resolve(webgazer);
-  //   } catch(err) {
-  //     onFail();
-  //     videoElement = null;
-  //     stream = null;
-  //     reject(err);
-  //   }
-  // });
 
   // if (webgazer.params.videoIsOn) {
   //   return webgazer
@@ -743,9 +723,11 @@ webgazer.isReady = function() {
  * @returns {webgazer} this
  */
 webgazer.pause = function() {
-  paused = true;
+  webgazer.params.paused = true;
   return webgazer;
 };
+
+/* -------------------------------------------------------------------------- */
 
 webgazer.stopLearning = function () {
   removeMouseEventListeners()
@@ -757,15 +739,17 @@ webgazer.startLearning = function () {
   return webgazer
 }
 
+/* -------------------------------------------------------------------------- */
+
 /**
  * Resumes collection of data and predictions if paused
  * @returns {webgazer} this
  */
 webgazer.resume = async function() {
-  if (!paused) {
+  if (!webgazer.params.paused) {
     return webgazer;
   }
-  paused = false;
+  webgazer.params.paused = false;
   await loop();
   return webgazer;
 };
@@ -775,14 +759,16 @@ webgazer.resume = async function() {
  * @return {webgazer} this
  */
 webgazer.end = function() {
-  //loop may run an extra time and fail due to removed elements
-  paused = true;
+  // loop may run an extra time and fail due to removed elements
+  webgazer.params.paused = true;
 
-  //webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
+  setTimeout(() => {
+    webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
 
-  //remove video element and canvas
-  document.body.removeChild(videoElement);
-  document.body.removeChild(videoElementCanvas);
+    //remove video element and canvas
+    document.body.removeChild(videoElement);
+    document.body.removeChild(videoElementCanvas);
+  }, 1000);
 
   return webgazer;
 };
