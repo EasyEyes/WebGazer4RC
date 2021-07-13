@@ -1,6 +1,7 @@
 {
   "name": "webgazer",
   "version": "2.0.1",
+  "private": "true",
   "repository": {
     "type": "git",
     "url": "https://github.com/brownhci/WebGazer.git"
@@ -12,8 +13,6 @@
     "clean": "rimraf dist",
     "prebuild": "npm run clean",
     "test": "./test/run_tests_and_server.sh",
-    "dev": "webpack --progress --colors --config webpack.config.js --mode=development",
-    "build": "webpack --progress --colors --config webpack.config.js --mode=production && cp dist/webgazer.js www/. && cp dist/webgazer.js www/data/src/.",
     "gen_docs": "jsdoc -c jsdoc.conf.json src/*"
   },
   "files": [
@@ -30,8 +29,8 @@
   ],
   "dependencies": {
     "@tensorflow-models/facemesh": "^0.0.5",
-    "@tensorflow/tfjs": "^3.6.0",
-    "localforage": "1.7.3",
+    "@tensorflow/tfjs": "^3.7.0",
+    "localforage": "^1.9.0",
     "numeric": "1.2.6",
     "regression": "2.0.1"
   },
@@ -46,8 +45,6 @@
     "parallel-webpack": "2.6.0",
     "puppeteer": "^5.2.1",
     "rimraf": "2.6.3",
-    "webpack": "4.44.1",
-    "webpack-cli": "3.3.12",
     "yarnhook": "^0.4.3"
   }
 }

@@ -50,6 +50,10 @@ var latestEyeFeatures = null;
 var latestGazeData = null;
 /* -------------------------------------------------------------------------- */
 webgazer.params.paused = false;
+
+webgazer.params.greedyLearner = false;
+webgazer.params.framerate = 60;
+webgazer.params.showGazeDot = false
 /* -------------------------------------------------------------------------- */
 // registered callback for loop
 var nopCallback = function(data) {};
@@ -340,11 +344,7 @@ async function loop() {
           ++k
           if (k == 50) k = 0
         }
-        // GazeDot
-        // if (webgazer.params.showGazeDot) {
-        //   gazeDot.style.display = 'block';
-        // }
-        // gazeDot.style.transform = 'translate3d(' + pred.x + 'px,' + pred.y + 'px,0)';
+
         gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
       }
 
@@ -662,10 +662,6 @@ webgazer.begin = function(onFail) {
   //   return webgazer;
   // }
 
-  // if (webgazer.params.videoIsOn) {
-  //   return webgazer
-  // }
-
   return webgazer._begin(false)
 };
 
@@ -758,18 +754,24 @@ webgazer.resume = async function() {
  * stops collection of data and removes dom modifications, must call begin() to reset up
  * @return {webgazer} this
  */
-webgazer.end = function() {
+webgazer.end = function(endAll = false) {
   // loop may run an extra time and fail due to removed elements
-  webgazer.params.paused = true;
+  // webgazer.params.paused = true;
+  if (endAll) {
+    smoothingVals = new util.DataWindow(4);
+    k = 0;
+    _now = null;
+    _last = -1;
 
-  setTimeout(() => {
-    webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
+    webgazer.params.videoIsOn = false
+    setTimeout(() => {
+      webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
 
-    //remove video element and canvas
-    document.body.removeChild(videoElement);
-    document.body.removeChild(videoElementCanvas);
-  }, 1000);
-
+      //remove video element and canvas
+      // document.body.removeChild(videoElement);
+      document.body.removeChild(videoContainerElement);
+    }, 500);
+  }
   return webgazer;
 };
 
@@ -782,10 +784,10 @@ webgazer.stopVideo = function() {
   videoStream.getTracks()[0].stop();
 
   // Removes the outline of the face
-  document.body.removeChild( faceOverlay );
+  // document.body.removeChild( faceOverlay );
 
   // Removes the box around the face
-  document.body.removeChild( faceFeedbackBox );
+  // document.body.removeChild( faceFeedbackBox );
 
   return webgazer;
 }
