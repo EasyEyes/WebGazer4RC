@@ -1,9 +1,4 @@
-import mat from './mat.mjs';
-import params from './params.mjs';
-import numeric from 'numeric';
-
 const util = {};
-
 
 var resizeWidth = 10;
 var resizeHeight = 6;
@@ -42,8 +37,8 @@ util.getEyeFeats = function(eyes) {
     var histRight = [];
     this.equalizeHistogram(rightGray, 5, histRight);
 
-    var leftGrayArray = Array.prototype.slice.call(histLeft);
-    var rightGrayArray = Array.prototype.slice.call(histRight);
+    // var leftGrayArray = Array.prototype.slice.call(histLeft);
+    // var rightGrayArray = Array.prototype.slice.call(histRight);
 
     return histLeft.concat(histRight);
 }
