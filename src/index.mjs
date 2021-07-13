@@ -126,64 +126,63 @@ webgazer.computeValidationBoxSize = function() {
   return [topVal, leftVal, boxSize, boxSize]
 }
 
-/**
- * Checks if the pupils are in the position box on the video
- * // TODO These are all wrong. The latestEyeFeatures will be in 'video' space not 'preview' space, and so need to be converted.
- */
-function checkEyesInValidationBox() {
+let _w, _h, _smaller, _boxSize, _topBound, _leftBound, _rightBound, _bottomBound
+let _eyeLX, _eyeLY, _eyeRX, _eyeRY
+let hasBounds = false
+let gettingBounds = false
 
-  if (faceFeedbackBox != null && latestEyeFeatures) {
-    var w = videoElement.videoWidth;
-    var h = videoElement.videoHeight;
+function _helper_getBounds() {
+  gettingBounds = true
+  setTimeout(() => {
+    _w = videoElement.videoWidth
+    _h = videoElement.videoHeight
 
     // Find the size of the box.
     // Pick the smaller of the two video preview sizes
-    var smaller = Math.min( w, h );
-    var boxSize = smaller * webgazer.params.faceFeedbackBoxRatio;
+    _smaller = Math.min(_w, _h)
+    _boxSize = _smaller * webgazer.params.faceFeedbackBoxRatio
 
     // Set the boundaries of the face overlay validation box based on the preview
-    var topBound = (h - boxSize)/2;
-    var leftBound = (w - boxSize)/2;
-    var rightBound = leftBound + boxSize;
-    var bottomBound = topBound + boxSize;
+    _topBound = (_h - _boxSize) / 2
+    _leftBound = (_w - _boxSize) / 2
+    _rightBound = _leftBound + _boxSize
+    _bottomBound = _topBound + _boxSize
 
-    //get the x and y positions of the left and right eyes
-    var eyeLX = latestEyeFeatures.left.imagex;
-    var eyeLY = latestEyeFeatures.left.imagey;
-    var eyeRX = latestEyeFeatures.right.imagex;
-    var eyeRY = latestEyeFeatures.right.imagey;
+    hasBounds = true
+    gettingBounds = false
+  }, 500)
+}
 
+// TODO WebGazer doesn't provide correct validation feedback
+/**
+ * Checks if the pupils are in the position box on the video
+ */
+function checkEyesInValidationBox() {
+  if (faceFeedbackBox !== null && latestEyeFeatures) {
+    if (!hasBounds && !gettingBounds) _helper_getBounds()
 
-    var xPositions = false;
-    var yPositions = false;
+    // Get the x and y positions of the left and right eyes
+    _eyeLX = _w - latestEyeFeatures.left.imagex
+    _eyeRX = _w - latestEyeFeatures.right.imagex
+    _eyeLY = latestEyeFeatures.left.imagey
+    _eyeRY = latestEyeFeatures.right.imagey
 
-    //check if the x values for the left and right eye are within the
-    //validation box
-    if (eyeLX > leftBound && eyeLX < rightBound) {
-      if (eyeRX > leftBound && eyeRX < rightBound) {
-        xPositions = true;
-      }
-    }
-
-    //check if the y values for the left and right eye are within the
-    //validation box
-    if (eyeLY > topBound && eyeLY < bottomBound) {
-      if (eyeRY > topBound && eyeRY < bottomBound) {
-        yPositions = true;
-      }
-    }
-
-    //if the x and y values for both the left and right eye are within
-    //the validation box then the box border turns green, otherwise if
-    //the eyes are outside of the box the colour is red
-    if (xPositions && yPositions){
-      faceFeedbackBox.style.border = 'solid gray 2px';
+    if (
+      hasBounds &&
+      _eyeLX > _leftBound &&
+      _eyeLX < _rightBound &&
+      _eyeRX > _leftBound &&
+      _eyeRX < _rightBound &&
+      _eyeLY > _topBound &&
+      _eyeLY < _bottomBound &&
+      _eyeRY > _topBound &&
+      _eyeRY < _bottomBound
+    ) {
+      faceFeedbackBox.style.border = 'solid gray 2px'
     } else {
-      faceFeedbackBox.style.border =  'solid red 4px';
+      faceFeedbackBox.style.border = 'solid red 4px'
     }
-  }
-  else
-    faceFeedbackBox.style.border = 'solid gray 2px';
+  } else faceFeedbackBox.style.border = 'solid red 4px'
 }
 
 /**
@@ -244,8 +243,6 @@ function paintCurrentFrame(canvas, width, height) {
  */
 async function getPrediction(regModelIndex) {
   var predictions = [];
-  // [20200617 xk] TODO: this call should be made async somehow. will take some work.
-  latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 
   if (regs.length === 0) {
     console.log('regression not set, call setRegression()');
@@ -295,6 +292,9 @@ async function loop() {
     // [20180729 JT] Why do we need to do this? clmTracker does this itself _already_, which is just duplicating the work.
     // Is it because other trackers need a canvas instead of an img/video element?
     paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+
+    // [20200617 xk] TODO: this call should be made async somehow. will take some work.
+    latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 
     // Draw face overlay
     if (webgazer.params.showFaceOverlay) {
@@ -551,7 +551,7 @@ async function init(initMode = 'all', stream) {
     faceFeedbackBox = document.createElement('canvas');
     faceFeedbackBox.id = webgazer.params.faceFeedbackBoxId;
     faceFeedbackBox.style.display = webgazer.params.showFaceFeedbackBox ? 'block' : 'none';
-    faceFeedbackBox.style.border = 'solid gray 2px';
+    faceFeedbackBox.style.border = 'solid red 4px';
     faceFeedbackBox.style.position = 'absolute';
 
     // Add other preview/feedback elements to the screen once the video has shown and its parameters are initialized
@@ -762,6 +762,8 @@ webgazer.end = function(endAll = false) {
     k = 0;
     _now = null;
     _last = -1;
+
+    hasBounds = false
 
     webgazer.params.videoIsOn = false
     setTimeout(() => {
