@@ -504,8 +504,8 @@ async function init(initMode = 'all', stream) {
     videoContainerElement.id = webgazer.params.videoContainerId;
     videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
     // videoContainerElement.style.position = 'fixed';
-    // videoContainerElement.style.top = topDist;
-    // videoContainerElement.style.left = leftDist;
+    videoContainerElement.style.left = '10px';
+    videoContainerElement.style.bottom = '10px';
     videoContainerElement.style.width = webgazer.params.videoViewerWidth + 'px';
     videoContainerElement.style.height = webgazer.params.videoViewerHeight + 'px';
 
