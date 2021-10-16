@@ -51,7 +51,7 @@ describe('webgazer function', async() => {
 			assert.equal(videoAvailable,true);
 			assert.equal(isReady,true);
 		});
-		//modifying visibility params
+		// modifying visibility params
 		it('webgazerVideoFeed should display', async() => {
 			let video_display = await page.evaluate(async() => {
 				return document.getElementById('webgazerVideoFeed').style.display

@@ -503,7 +503,8 @@ async function init(initMode = 'all', stream) {
     videoContainerElement = document.createElement('div');
     videoContainerElement.id = webgazer.params.videoContainerId;
     videoContainerElement.style.display = 'block';
-    videoContainerElement.style.visibility = webgazer.params.showVideo ? 'visible' : 'hidden';
+    // videoContainerElement.style.visibility = webgazer.params.showVideo ? 'visible' : 'hidden';
+    videoContainerElement.style.opacity = webgazer.params.showVideo ? 0.8 : 0;
     // videoContainerElement.style.position = 'fixed';
     videoContainerElement.style.left = '10px';
     videoContainerElement.style.bottom = '10px';
@@ -516,7 +517,7 @@ async function init(initMode = 'all', stream) {
     videoElement.srcObject = stream;
     videoElement.autoplay = true;
     videoElement.style.display = 'block';
-    videoElement.style.visibility = webgazer.params.showVideo ? 'visible' : 'hidden';
+    // videoElement.style.visibility = webgazer.params.showVideo ? 'visible' : 'hidden';
     videoElement.style.position = 'absolute';
     // We set these to stop the video appearing too large when it is added for the very first time
     videoElement.style.width = webgazer.params.videoViewerWidth + 'px';
@@ -526,7 +527,8 @@ async function init(initMode = 'all', stream) {
     videoElementCanvas = document.createElement('canvas');
     videoElementCanvas.id = webgazer.params.videoElementCanvasId;
     videoElementCanvas.style.display = 'block';
-    videoElementCanvas.style.visibility = 'hidden';
+    videoElementCanvas.style.opacity = 0;
+    // videoElementCanvas.style.visibility = 'hidden';
 
     // Face overlay
     // Shows the CLM tracking result
@@ -834,13 +836,15 @@ webgazer.showVideoPreview = function(val) {
  * @param {*} bool
  * @return {webgazer} this
  */
-webgazer.showVideo = function(val) {
+webgazer.showVideo = function(val, opacity = 0.8) {
   webgazer.params.showVideo = val;
-  if(videoElement) {
-    videoElement.style.visibility = val ? 'visible' : 'hidden';
-  }
-  if(videoContainerElement) {
-    videoContainerElement.style.visibility = val ? 'visible' : 'hidden';
+  // if (videoElement) {
+  //   videoElement.style.visibility = val ? 'visible' : 'hidden';
+  //   videoElement.style.opacity = val ? 1 : 0;
+  // }
+  if (videoContainerElement) {
+    // videoContainerElement.style.visibility = val ? 'visible' : 'hidden';
+    videoContainerElement.style.opacity = val ? opacity : 0;
   }
   return webgazer;
 };
