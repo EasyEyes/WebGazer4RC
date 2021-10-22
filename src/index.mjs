@@ -285,6 +285,26 @@ let _last = -1
 // From getting the video frame to get data
 let _oneLoopFinished = true
 
+async function gazePrep(forcedPrep = false) {
+  paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+
+  // [20200617 xk] TODO: this call should be made async somehow. will take some work.
+  if (!webgazer.params.paused || forcedPrep)
+    latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+
+  // Draw face overlay
+  if (webgazer.params.showFaceOverlay) {
+    // Get tracker object
+    var tracker = webgazer.getTracker();
+    faceOverlay.getContext('2d').clearRect(0, 0, videoElement.videoWidth, videoElement.videoHeight);
+    tracker.drawFaceOverlay(faceOverlay.getContext('2d'), tracker.getPositions());
+  }
+
+  // Feedback box
+  // Check that the eyes are inside of the validation box
+  if (webgazer.params.showFaceFeedbackBox) checkEyesInValidationBox();
+}
+
 async function loop() {
   _now = window.performance.now()
 
@@ -300,22 +320,7 @@ async function loop() {
       _oneLoopFinished = false
       webgazer.params.getLatestVideoFrameTimestamp(new Date().getTime())
     }
-    paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
-
-    // [20200617 xk] TODO: this call should be made async somehow. will take some work.
-    latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
-
-    // Draw face overlay
-    if (webgazer.params.showFaceOverlay) {
-      // Get tracker object
-      var tracker = webgazer.getTracker();
-      faceOverlay.getContext('2d').clearRect(0, 0, videoElement.videoWidth, videoElement.videoHeight);
-      tracker.drawFaceOverlay(faceOverlay.getContext('2d'), tracker.getPositions());
-    }
-
-    // Feedback box
-    // Check that the eyes are inside of the validation box
-    if (webgazer.params.showFaceFeedbackBox) checkEyesInValidationBox();
+    await gazePrep()
   }
 
   if (!webgazer.params.paused) {
@@ -761,6 +766,7 @@ webgazer.resume = async function() {
     return webgazer;
   }
   webgazer.params.paused = false;
+  _oneLoopFinished = true
   await loop();
   return webgazer;
 };
@@ -1190,7 +1196,9 @@ webgazer.getRegression = function() {
  * Requests an immediate prediction
  * @return {object} prediction data object
  */
-webgazer.getCurrentPrediction = function(regIndex) {
+webgazer.getCurrentPrediction = async function(regIndex) {
+  webgazer.params.getLatestVideoFrameTimestamp(new Date().getTime())
+  await gazePrep(true)
   return getPrediction(regIndex);
 };
 
