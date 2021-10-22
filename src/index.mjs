@@ -54,6 +54,8 @@ webgazer.params.paused = false;
 webgazer.params.greedyLearner = false;
 webgazer.params.framerate = 60;
 webgazer.params.showGazeDot = false
+
+webgazer.params.getLatestVideoFrameTimestamp = null
 /* -------------------------------------------------------------------------- */
 // registered callback for loop
 var nopCallback = function(data) {};
@@ -280,6 +282,9 @@ var k = 0;
 let _now = null
 let _last = -1
 
+// From getting the video frame to get data
+let _oneLoopFinished = true
+
 async function loop() {
   _now = window.performance.now()
 
@@ -291,6 +296,10 @@ async function loop() {
     // Paint the latest video frame into the canvas which will be analyzed by WebGazer
     // [20180729 JT] Why do we need to do this? clmTracker does this itself _already_, which is just duplicating the work.
     // Is it because other trackers need a canvas instead of an img/video element?
+    if (_oneLoopFinished) {
+      _oneLoopFinished = false
+      webgazer.params.getLatestVideoFrameTimestamp(new Date().getTime())
+    }
     paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 
     // [20200617 xk] TODO: this call should be made async somehow. will take some work.
@@ -323,8 +332,9 @@ async function loop() {
 
       // [20200623 xk] callback to function passed into setGazeListener(fn)
       callback(latestGazeData);
+      _oneLoopFinished = true
 
-      if( latestGazeData ) {
+      if (latestGazeData) {
         // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
         smoothingVals.push(latestGazeData);
         var x = 0;
