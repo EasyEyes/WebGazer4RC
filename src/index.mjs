@@ -53,9 +53,9 @@ webgazer.params.paused = false;
 
 webgazer.params.greedyLearner = false;
 webgazer.params.framerate = 60;
-webgazer.params.showGazeDot = false
+webgazer.params.showGazeDot = false;
 
-webgazer.params.getLatestVideoFrameTimestamp = null
+webgazer.params.getLatestVideoFrameTimestamp = () => {};
 /* -------------------------------------------------------------------------- */
 // registered callback for loop
 var nopCallback = function(data) {};
@@ -318,7 +318,7 @@ async function loop() {
     // Is it because other trackers need a canvas instead of an img/video element?
     if (_oneLoopFinished) {
       _oneLoopFinished = false
-      webgazer.params.getLatestVideoFrameTimestamp(new Date().getTime())
+      webgazer.params.getLatestVideoFrameTimestamp(new Date())
     }
     await gazePrep()
   }
@@ -1197,7 +1197,7 @@ webgazer.getRegression = function() {
  * @return {object} prediction data object
  */
 webgazer.getCurrentPrediction = async function(regIndex) {
-  webgazer.params.getLatestVideoFrameTimestamp(new Date().getTime())
+  webgazer.params.getLatestVideoFrameTimestamp(new Date())
   await gazePrep(true)
   return getPrediction(regIndex);
 };
