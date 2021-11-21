@@ -20,8 +20,8 @@
   ],
   "dependencies": {
     "@tensorflow-models/facemesh": "^0.0.5",
-    "@tensorflow/tfjs": "^3.8.0",
-    "localforage": "^1.9.0",
+    "@tensorflow/tfjs": "^3.11.0",
+    "localforage": "^1.10.0",
     "numeric": "1.2.6",
     "regression": "2.0.1"
   }

@@ -906,7 +906,7 @@ webgazer.showPredictionPoints = function(val) {
 };
 
 /**
- * Set whether localprevious calibration data (from localforage) should be loaded.
+ * Set whether previous calibration data (from localforage) should be loaded.
  * Default true.
  * 
  * NOTE: Should be called before webgazer.begin() -- see www/js/main.js for example
@@ -1009,6 +1009,10 @@ webgazer.setVideoViewerSize = function(w, h) {
   // Change the video viewer
   videoElement.style.width = w + 'px';
   videoElement.style.height = h + 'px';
+
+  // Change video container
+  videoContainerElement.style.width = w + 'px';
+  videoContainerElement.style.height = h + 'px';
 
   // Change the face overlay
   faceOverlay.style.width = w + 'px';
@@ -1226,7 +1230,7 @@ webgazer.getVideoPreviewToCameraResolutionRatio = function() {
 }
 
 /*
- * Gets the fifty most recent tracker preditions
+ * Gets the fifty most recent tracker predictions
  */
 webgazer.getStoredPoints = function() {
   return [xPast50, yPast50];
