@@ -294,8 +294,10 @@ async function gazePrep(forcedPrep = false) {
   paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 
   // [20200617 xk] TODO: this call should be made async somehow. will take some work.
-  if (!webgazer.params.paused || forcedPrep)
+  if (!webgazer.params.paused || forcedPrep) {
     latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+    // console.log(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+  }
 
   // Draw face overlay
   if (webgazer.params.showFaceOverlay) {
@@ -1027,13 +1029,12 @@ webgazer.setCameraConstraints = async function(constraints) {
         track.stop();
       })
       const stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-      const videoTrack = videoStream.getVideoTracks()[0];
-      const videoSettings = videoTrack.getSettings();
-      setInternalVideoBufferSizes( videoSettings.width, videoSettings.height );
-
       setTimeout(() => {
+        const videoTrack = stream.getVideoTracks()[0];
+        const videoSettings = videoTrack.getSettings();
         videoStream = stream;
         videoElement.srcObject = stream;
+        setInternalVideoBufferSizes( videoSettings.width, videoSettings.height );
         console.log('New constraints applied');
       }, 1500);
     } catch(err) {
