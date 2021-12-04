@@ -682,21 +682,21 @@ webgazer.begin = function(onFail) {
   //   loadGlobalData();
   // }
 
-  onFail = onFail || function() {console.log('No stream')};
+  // onFail = onFail || function() {console.log('No stream')};
 
   // if (debugVideoLoc) {
   //   init(debugVideoLoc);
   //   return webgazer;
   // }
 
-  return webgazer._begin(false)
+  return webgazer._begin(false, onFail)
 };
 
 /**
  * Start the video element.
  */
-webgazer.beginVideo = function () {
-  webgazer._begin(true)
+webgazer.beginVideo = function (onFail) {
+  webgazer._begin(true, onFail)
 }
 
 /* ------------------------------ Video switch ------------------------------ */
@@ -747,7 +747,7 @@ const _setUpConstraints = (originalConstraints) => {
   }
 }
 
-webgazer._begin = function (videoOnly) {
+webgazer._begin = function (videoOnly, onVideoFail) {
   // SETUP VIDEO ELEMENTS
   // Sets .mediaDevices.getUserMedia depending on browser
   if (!webgazer.params.videoIsOn) {
@@ -758,15 +758,25 @@ webgazer._begin = function (videoOnly) {
       try {
         if (typeof navigator.mediaDevices !== 'undefined')
           navigator.mediaDevices.enumerateDevices().then(async (sources) => {
-            _gotSources(sources)
-            stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
+            _gotSources(sources);
+            if (videoInputs.length === 0) {
+              onVideoFail(videoInputs);
+              throw 'No camera';
+            }
+
+            try {
+              stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
+            } catch (error) {
+              onVideoFail(videoInputs);
+              throw error;
+            }
 
             init(videoOnly ? 'video' : 'all', stream).then(() => {
               if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
             });
-            //
+            ////
             webgazer.params.videoIsOn = true
-            //
+            ////
             if (!videoOnly) resolve(webgazer);
           });
       } catch(err) {
@@ -1025,7 +1035,7 @@ webgazer.setCameraConstraints = async function(constraints) {
         videoStream = stream;
         videoElement.srcObject = stream;
         console.log('New constraints applied');
-      }, 700);
+      }, 1500);
     } catch(err) {
       console.log(err);
       return;
