@@ -56,12 +56,17 @@ webgazer.params.framerate = 60;
 webgazer.params.showGazeDot = false;
 
 webgazer.params.getLatestVideoFrameTimestamp = () => {};
+webgazer.params.activeCamera = {
+  label: '',
+  id: '',
+};
 /* -------------------------------------------------------------------------- */
+
+let videoInputs = []
+
 // registered callback for loop
 var nopCallback = function(data) {};
 var callback = nopCallback;
-
-let learning = false // Regression
 
 //Types that regression systems should handle
 //Describes the source of data so that regression systems may ignore or handle differently the various generating events
@@ -365,7 +370,9 @@ async function loop() {
 
     }
   } else {
-    gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
+    try {
+      gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
+    } catch (error) {}
   }
 
   requestAnimationFrame(loop);
@@ -675,24 +682,72 @@ webgazer.begin = function(onFail) {
   //   loadGlobalData();
   // }
 
-  onFail = onFail || function() {console.log('No stream')};
+  // onFail = onFail || function() {console.log('No stream')};
 
   // if (debugVideoLoc) {
   //   init(debugVideoLoc);
   //   return webgazer;
   // }
 
-  return webgazer._begin(false)
+  return webgazer._begin(false, onFail)
 };
 
 /**
  * Start the video element.
  */
-webgazer.beginVideo = function () {
-  webgazer._begin(true)
+webgazer.beginVideo = function (onFail) {
+  webgazer._begin(true, onFail)
 }
 
-webgazer._begin = function (videoOnly) {
+/* ------------------------------ Video switch ------------------------------ */
+
+const _foldString = (str) => {
+  if (str.length < 8) return str
+  else return str.slice(0, 8) + '...'
+}
+
+const _setUpActiveCameraSwitch = (inputs) => {
+  const parent = videoContainerElement;
+  
+  const selectElement = document.createElement('select')
+  selectElement.className = selectElement.id = 'webgazer-videoinput-select'
+  selectElement.name = 'videoinput'
+  inputs.forEach((input, ind) => {
+    selectElement.innerHTML += `<option value="${input.deviceId + '%' + input.label}"${ind === 0 ? ' selected' : ''} name="1">${_foldString(input.label)}</option>`;
+  })
+
+  selectElement.onchange = e => {
+    const [id, label] = selectElement.value.split('%')
+    webgazer.params.activeCamera.label = label
+    webgazer.params.activeCamera.id = id
+
+    webgazer.setCameraConstraints(_setUpConstraints(webgazer.params.camConstraints));
+  }
+  
+  parent.appendChild(selectElement);
+}
+
+const _gotSources = (sources) => {
+  videoInputs = []
+  sources.forEach(device => {
+    if (device.kind === 'videoinput') videoInputs.push(device)
+  });
+
+  webgazer.params.activeCamera.label = videoInputs[0].label
+  webgazer.params.activeCamera.id = videoInputs[0].deviceId
+}
+
+const _setUpConstraints = (originalConstraints) => {
+  if (!webgazer.params.activeCamera.id) return originalConstraints
+  return {
+    video: {
+      ...originalConstraints.video,
+      deviceId: webgazer.params.activeCamera.id,
+    }
+  }
+}
+
+webgazer._begin = function (videoOnly, onVideoFail) {
   // SETUP VIDEO ELEMENTS
   // Sets .mediaDevices.getUserMedia depending on browser
   if (!webgazer.params.videoIsOn) {
@@ -701,15 +756,31 @@ webgazer._begin = function (videoOnly) {
     return new Promise(async (resolve, reject) => {
       let stream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-        init(videoOnly ? 'video' : 'all', stream);
-        //
-        webgazer.params.videoIsOn = true
-        //
-        if (!videoOnly) resolve(webgazer);
+        if (typeof navigator.mediaDevices !== 'undefined')
+          navigator.mediaDevices.enumerateDevices().then(async (sources) => {
+            _gotSources(sources);
+            if (videoInputs.length === 0) {
+              onVideoFail(videoInputs);
+              throw 'No camera';
+            }
+
+            try {
+              stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
+            } catch (error) {
+              onVideoFail(videoInputs);
+              throw error;
+            }
+
+            init(videoOnly ? 'video' : 'all', stream).then(() => {
+              if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
+            });
+            ////
+            webgazer.params.videoIsOn = true
+            ////
+            if (!videoOnly) resolve(webgazer);
+          });
       } catch(err) {
         console.log(err);
-        onFail();
         videoElement = null;
         stream = null;
         reject(err);
@@ -942,26 +1013,37 @@ webgazer.applyKalmanFilter = function(val) {
  * Warning: Setting a large video resolution will decrease performance, and may require
  */
 webgazer.setCameraConstraints = async function(constraints) {
-  var videoTrack,videoSettings;
+  // var videoTrack, videoSettings;
   webgazer.params.camConstraints = constraints;
 
   // If the camera stream is already up...
   if(videoStream)
   {
     webgazer.pause();
-    videoTrack = videoStream.getVideoTracks()[0];
+    // videoTrack = videoStream.getVideoTracks()[0];
     try {
-      await videoTrack.applyConstraints( webgazer.params.camConstraints );
-      videoSettings = videoTrack.getSettings();
+      // await videoTrack.applyConstraints( webgazer.params.camConstraints );
+      videoStream.getVideoTracks().forEach(track => {
+        track.stop();
+      })
+      const stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
+      const videoTrack = videoStream.getVideoTracks()[0];
+      const videoSettings = videoTrack.getSettings();
       setInternalVideoBufferSizes( videoSettings.width, videoSettings.height );
+
+      setTimeout(() => {
+        videoStream = stream;
+        videoElement.srcObject = stream;
+        console.log('New constraints applied');
+      }, 1500);
     } catch(err) {
-      console.log( err );
+      console.log(err);
       return;
     }
     // Reset and recompute sizes of the video viewer.
     // This is only to adjust the feedback box, say, if the aspect ratio of the video has changed.
-    webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight )
-    webgazer.getTracker().reset();
+    // webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight )
+    // webgazer.getTracker().reset();
     await webgazer.resume();
   }
 }
