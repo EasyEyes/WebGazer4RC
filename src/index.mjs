@@ -34,6 +34,7 @@ var videoElementCanvas = null;
 var faceOverlay = null;
 var faceFeedbackBox = null;
 var gazeDot = null;
+var gazeDotPopped = false;
 // Why is this not in webgazer.params ?
 var debugVideoLoc = '';
 
@@ -99,7 +100,6 @@ var defaults = {
   'data': [],
   'settings': {}
 };
-
 
 //PRIVATE FUNCTIONS
 
@@ -372,9 +372,8 @@ async function loop() {
 
     }
   } else {
-    try {
+    if (gazeDot && !gazeDotPopped)
       gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
-    } catch (error) {}
   }
 
   requestAnimationFrame(loop);
@@ -839,7 +838,19 @@ webgazer.resume = async function() {
     return webgazer;
   }
   webgazer.params.paused = false;
-  _oneLoopFinished = true
+  _oneLoopFinished = true;
+
+  // in case called getGazeNow() during the pause
+  if (gazeDotPopInterval.current) {
+    clearInterval(gazeDotPopInterval.current)
+    gazeDotPopInterval.current = undefined
+    gazeDotPopped = false
+
+    gazeDot.style.backgroundColor = ''
+    gazeDot.style.opacity = ''
+    gazeDot.style.transform = `translate(-15px, -15px)`
+  }
+
   await loop();
   return webgazer;
 };
@@ -934,6 +945,7 @@ webgazer.showVideo = function(val, opacity = 0.8) {
   if (videoContainerElement) {
     // videoContainerElement.style.visibility = val ? 'visible' : 'hidden';
     videoContainerElement.style.opacity = val ? opacity : 0;
+    videoContainerElement.style.zIndex = val ? 999999997 : -999999997;
   }
   return webgazer;
 };
@@ -972,11 +984,43 @@ webgazer.showFaceFeedbackBox = function(val) {
  */
 webgazer.showPredictionPoints = function(val) {
   webgazer.params.showGazeDot = val;
-  if( gazeDot ) {
+  if ( gazeDot ) {
     gazeDot.style.display = val ? 'block' : 'none';
   }
   return webgazer;
 };
+
+const gazeDotPopInterval = { current: undefined }
+
+webgazer.popPredictionPoints = function() {
+  if (gazeDotPopInterval.current) {
+    clearInterval(gazeDotPopInterval.current)
+    gazeDotPopInterval.current = undefined
+    gazeDotPopped = false
+  }
+
+  if (gazeDot && webgazer.params.showGazeDot) {
+    gazeDotPopped = true
+
+    // gazeDot.style.display = 'block'
+    gazeDot.style.backgroundColor = 'red'
+    gazeDot.style.opacity = 1
+    gazeDotPopInterval.current = setInterval(() => {
+      gazeDot.style.opacity -= 0.02
+      if (gazeDot.style.opacity <= 0.02) {
+        clearInterval(gazeDotPopInterval.current)
+        gazeDotPopInterval.current = undefined
+        gazeDotPopped = false
+
+        // gazeDot.style.display = 'none'
+        gazeDot.style.backgroundColor = ''
+        gazeDot.style.opacity = ''
+        gazeDot.style.transform = `translate(-15px, -15px)`
+      }
+    }, 50); // 20 * 50 = 1 second
+  }
+  return webgazer;
+}
 
 /**
  * Set whether previous calibration data (from localforage) should be loaded.
@@ -1283,10 +1327,23 @@ webgazer.getRegression = function() {
  * Requests an immediate prediction
  * @return {object} prediction data object
  */
-webgazer.getCurrentPrediction = async function(regIndex) {
-  webgazer.params.getLatestVideoFrameTimestamp(new Date())
-  await gazePrep(true)
-  return getPrediction(regIndex);
+webgazer.getCurrentPrediction = async function(regIndex = 0) {
+  // TODO how to avoid this, given the regression model used?
+  for (let i = 0; i < 6; i++) {
+    await gazePrep(true);
+    await getPrediction();
+  }
+  // actual measurement this time
+  webgazer.params.getLatestVideoFrameTimestamp(new Date());
+  await gazePrep(true);
+  const prediction = await getPrediction();
+
+  if ( gazeDot ) {
+    const boundedPrediction = util.bound({x: prediction.x, y: prediction.y})
+    gazeDot.style.transform = `translate(${boundedPrediction.x}px, ${boundedPrediction.y}px)`
+  }
+
+  return prediction;
 };
 
 /**
