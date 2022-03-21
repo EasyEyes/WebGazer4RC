@@ -874,9 +874,8 @@ webgazer.end = function(endAll = false) {
     setTimeout(() => {
       webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
 
-      //remove video element and canvas
-      // document.body.removeChild(videoElement);
-      document.body.removeChild(videoContainerElement);
+      // remove video element and canvas
+      videoContainerElement.remove();
     }, 500);
   }
   return webgazer;
@@ -938,12 +937,8 @@ webgazer.showVideoPreview = function(val) {
  */
 webgazer.showVideo = function(val, opacity = 0.8) {
   webgazer.params.showVideo = val;
-  // if (videoElement) {
-  //   videoElement.style.visibility = val ? 'visible' : 'hidden';
-  //   videoElement.style.opacity = val ? 1 : 0;
-  // }
+
   if (videoContainerElement) {
-    // videoContainerElement.style.visibility = val ? 'visible' : 'hidden';
     videoContainerElement.style.opacity = val ? opacity : 0;
     videoContainerElement.style.zIndex = val ? 999999997 : -999999997;
   }
