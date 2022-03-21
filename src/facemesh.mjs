@@ -1,4 +1,5 @@
 const FacemeshModel = require('@tensorflow-models/facemesh');
+
 /**
  * Constructor of TFFaceMesh object
  * @constructor
