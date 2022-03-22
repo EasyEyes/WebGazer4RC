@@ -325,7 +325,7 @@ async function loop() {
     // Is it because other trackers need a canvas instead of an img/video element?
     if (_oneLoopFinished) {
       _oneLoopFinished = false
-      webgazer.params.getLatestVideoFrameTimestamp(new Date())
+      webgazer.params.getLatestVideoFrameTimestamp(performance.now())
     }
     await gazePrep()
   }
@@ -1329,7 +1329,7 @@ webgazer.getCurrentPrediction = async function(regIndex = 0) {
     await getPrediction();
   }
   // actual measurement this time
-  webgazer.params.getLatestVideoFrameTimestamp(new Date());
+  webgazer.params.getLatestVideoFrameTimestamp(performance.now());
   await gazePrep(true);
   const prediction = await getPrediction();
 
