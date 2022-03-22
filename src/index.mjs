@@ -441,21 +441,35 @@ var moveListener = function(event) {
 /**
  * Add event listeners for mouse click and move.
  */
-var addMouseEventListeners = function() {
-  //third argument set to true so that we get event on 'capture' instead of 'bubbling'
-  //this prevents a client using event.stopPropagation() preventing our access to the click
-  document.addEventListener('click', clickListener, true);
-  document.addEventListener('mousemove', moveListener, true);
+var addMouseEventListeners = function(options = {}) {
+  // third argument set to true so that we get event on 'capture' instead of 'bubbling'
+  // this prevents a client using event.stopPropagation() preventing our access to the click
+  options = Object.assign(
+    {
+      click: true,
+      move: true,
+    },
+    options
+  )
+  if (options.click) document.addEventListener('click', clickListener, true);
+  if (options.move) document.addEventListener('mousemove', moveListener, true);
 };
 
 /**
  * Remove event listeners for mouse click and move.
  */
-var removeMouseEventListeners = function() {
+var removeMouseEventListeners = function(options = {}) {
   // must set third argument to same value used in addMouseEventListeners
   // for this to work.
-  document.removeEventListener('click', clickListener, true);
-  document.removeEventListener('mousemove', moveListener, true);
+  options = Object.assign(
+    {
+      click: true,
+      move: true,
+    },
+    options
+  )
+  if (options.click) document.removeEventListener('click', clickListener, true);
+  if (options.move) document.removeEventListener('mousemove', moveListener, true);
 };
 
 /**
@@ -817,13 +831,13 @@ webgazer.pause = function() {
 
 /* -------------------------------------------------------------------------- */
 
-webgazer.stopLearning = function () {
-  removeMouseEventListeners()
+webgazer.stopLearning = function (options) {
+  removeMouseEventListeners(options)
   return webgazer
 }
 
-webgazer.startLearning = function () {
-  addMouseEventListeners()
+webgazer.startLearning = function (options) {
+  addMouseEventListeners(options)
   return webgazer
 }
 
@@ -1323,18 +1337,20 @@ webgazer.getRegression = function() {
  * @return {object} prediction data object
  */
 webgazer.getCurrentPrediction = async function(regIndex = 0) {
-  // TODO how to avoid this, given the regression model used?
-  for (let i = 0; i < 6; i++) {
-    await gazePrep(true);
-    await getPrediction();
-  }
-  // actual measurement this time
   webgazer.params.getLatestVideoFrameTimestamp(performance.now());
   await gazePrep(true);
+  // TODO how to avoid this, given the regression model used?
+  for (let i = 0; i < 9; i++)
+    await getPrediction();
+
+  // actual measurement this time
   const prediction = await getPrediction();
 
   if ( gazeDot ) {
-    const boundedPrediction = util.bound({x: prediction.x, y: prediction.y})
+    const boundedPrediction = util.bound({
+      x: prediction.x,
+      y: prediction.y,
+    })
     gazeDot.style.transform = `translate(${boundedPrediction.x}px, ${boundedPrediction.y}px)`
   }
 
