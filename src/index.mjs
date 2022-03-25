@@ -1337,24 +1337,45 @@ webgazer.getRegression = function() {
  * @return {object} prediction data object
  */
 webgazer.getCurrentPrediction = async function(regIndex = 0) {
-  webgazer.params.getLatestVideoFrameTimestamp(performance.now());
-  await gazePrep(true);
-  // TODO how to avoid this, given the regression model used?
-  for (let i = 0; i < 9; i++)
-    await getPrediction();
+  const framesNow = []
+  const predictions = []
+  // 3 frames
+  for (let frame = 0; frame < 3; frame++) {
+    framesNow.push(performance.now())
+    await gazePrep(true)
 
-  // actual measurement this time
-  const prediction = await getPrediction();
+    let prediction
+    for (let i = 0; i < 3; i++)
+      // TODO how to avoid this, given the regression model used?
+      prediction = await getPrediction()
 
-  if ( gazeDot ) {
-    const boundedPrediction = util.bound({
+    predictions.push({
       x: prediction.x,
       y: prediction.y,
+    })
+  }
+  webgazer.params.getLatestVideoFrameTimestamp(
+    framesNow.reduce((a, b) => a + b) / framesNow.length
+  ) // average timestamp of 3 frames
+  const finalPredictionX = Math.round(
+    predictions.reduce((a, b) => a + b.x, 0) / predictions.length
+  )
+  const finalPredictionY = Math.round(
+    predictions.reduce((a, b) => a + b.y, 0) / predictions.length
+  )
+
+  if (gazeDot) {
+    const boundedPrediction = util.bound({
+      x: finalPredictionX,
+      y: finalPredictionY,
     })
     gazeDot.style.transform = `translate(${boundedPrediction.x}px, ${boundedPrediction.y}px)`
   }
 
-  return prediction;
+  return {
+    x: finalPredictionX,
+    y: finalPredictionY,
+  }
 };
 
 /**
