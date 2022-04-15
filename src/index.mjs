@@ -15,6 +15,10 @@ import ridgeRegWeighted from './ridgeWeightedReg.mjs';
 import ridgeRegThreaded from './ridgeRegThreaded.mjs';
 import util from './util.mjs';
 
+function sleep(time) {
+  return new Promise(resolve => setTimeout(resolve, time))
+}
+
 const webgazer = {};
 webgazer.tracker = {};
 webgazer.tracker.TFFaceMesh = TFFaceMesh;
@@ -299,6 +303,7 @@ async function gazePrep(forcedPrep = false) {
     // console.log(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
   }
 
+  // We don't need these for getGazeNow() right?
   // Draw face overlay
   if (webgazer.params.showFaceOverlay) {
     // Get tracker object
@@ -310,6 +315,14 @@ async function gazePrep(forcedPrep = false) {
   // Feedback box
   // Check that the eyes are inside of the validation box
   if (webgazer.params.showFaceFeedbackBox) checkEyesInValidationBox();
+}
+
+function gazePrepForGetGazeNow1() {
+  paintCurrentFrame(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+}
+
+async function gazePrepForGetGazeNow2() {
+  latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
 }
 
 async function loop() {
@@ -1336,45 +1349,55 @@ webgazer.getRegression = function() {
  * Requests an immediate prediction
  * @return {object} prediction data object
  */
-webgazer.getCurrentPrediction = async function(regIndex = 0) {
-  const framesNow = []
-  const predictions = []
+webgazer.getCurrentPrediction = async function(regIndex = 0, wait = 0) {
+  // const framesNow = []
+  // const predictions = []
   // 3 frames
-  for (let frame = 0; frame < 3; frame++) {
-    framesNow.push(performance.now())
-    await gazePrep(true)
+  // for (let frame = 0; frame < 3; frame++) {
+  //   framesNow.push(performance.now())
+  //   await gazePrep(true)
 
-    let prediction
-    for (let i = 0; i < 3; i++)
-      // TODO how to avoid this, given the regression model used?
-      prediction = await getPrediction()
+  //   let prediction
+  //   for (let i = 0; i < 3; i++)
+  //     // TODO how to avoid this, given the regression model used?
+  //     prediction = await getPrediction()
 
-    predictions.push({
-      x: prediction.x,
-      y: prediction.y,
-    })
-  }
-  webgazer.params.getLatestVideoFrameTimestamp(
-    framesNow.reduce((a, b) => a + b) / framesNow.length
-  ) // average timestamp of 3 frames
-  const finalPredictionX = Math.round(
-    predictions.reduce((a, b) => a + b.x, 0) / predictions.length
-  )
-  const finalPredictionY = Math.round(
-    predictions.reduce((a, b) => a + b.y, 0) / predictions.length
-  )
+  //   predictions.push({
+  //     x: prediction.x,
+  //     y: prediction.y,
+  //   })
+  // }
+  webgazer.params.getLatestVideoFrameTimestamp(performance.now())
+  gazePrepForGetGazeNow1()
+
+  await sleep(wait)
+
+  await gazePrepForGetGazeNow2()
+  let prediction
+  for (let i = 0; i < 10; i++)
+    prediction = await getPrediction()
+
+  // webgazer.params.getLatestVideoFrameTimestamp(
+  //   framesNow.reduce((a, b) => a + b) / framesNow.length
+  // ) // average timestamp of 3 frames
+  // const finalPredictionX = Math.round(
+  //   predictions.reduce((a, b) => a + b.x, 0) / predictions.length
+  // )
+  // const finalPredictionY = Math.round(
+  //   predictions.reduce((a, b) => a + b.y, 0) / predictions.length
+  // )
 
   if (gazeDot) {
     const boundedPrediction = util.bound({
-      x: finalPredictionX,
-      y: finalPredictionY,
+      x: prediction.x,
+      y: prediction.y,
     })
     gazeDot.style.transform = `translate(${boundedPrediction.x}px, ${boundedPrediction.y}px)`
   }
 
   return {
-    x: finalPredictionX,
-    y: finalPredictionY,
+    x: prediction.x,
+    y: prediction.y,
   }
 };
 
