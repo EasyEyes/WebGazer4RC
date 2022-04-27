@@ -380,13 +380,15 @@ async function loop() {
           if (k == 50) k = 0
         }
 
+        gazeDot.style.opacity = '';
         gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
       }
 
     }
   } else {
     if (gazeDot && !gazeDotPopped)
-      gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
+      // gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
+      gazeDot.style.opacity = '0';
   }
 
   requestAnimationFrame(loop);
@@ -875,7 +877,7 @@ webgazer.resume = async function() {
 
     gazeDot.style.backgroundColor = ''
     gazeDot.style.opacity = ''
-    gazeDot.style.transform = `translate(-15px, -15px)`
+    // gazeDot.style.transform = `translate(-15px, -15px)`
   }
 
   await loop();
@@ -1037,7 +1039,7 @@ webgazer.popPredictionPoints = function() {
         // gazeDot.style.display = 'none'
         gazeDot.style.backgroundColor = ''
         gazeDot.style.opacity = ''
-        gazeDot.style.transform = `translate(-15px, -15px)`
+        // gazeDot.style.transform = `translate(-15px, -15px)`
       }
     }, 50); // 20 * 50 = 1 second
   }
