@@ -19,6 +19,11 @@ function sleep(time) {
   return new Promise(resolve => setTimeout(resolve, time))
 }
 
+function toFixedNumber(n, digits) {
+  let pow = Math.pow(10, digits)
+  return Math.round(n * pow) / pow
+}
+
 const webgazer = {};
 webgazer.tracker = {};
 webgazer.tracker.TFFaceMesh = TFFaceMesh;
@@ -1399,8 +1404,14 @@ webgazer.getCurrentPrediction = async function(regIndex = 0, wait = 150, frames 
   return {
     x: finalPredictionX,
     y: finalPredictionY,
+    raw: predictions.map(
+      prediction => ({
+        x: toFixedNumber(prediction.x, 0),
+        y: toFixedNumber(prediction.y, 0),
+      })
+    ),
   }
-};
+}
 
 /**
  * returns the different event types that may be passed to regressions when calling regression.addData()
