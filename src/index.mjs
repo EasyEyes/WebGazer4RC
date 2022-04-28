@@ -252,27 +252,29 @@ function paintCurrentFrame(canvas, width, height) {
  * @param {Number|undefined} regModelIndex - The prediction index we're looking for
  * @returns {*}
  */
-async function getPrediction(regModelIndex) {
+async function getPrediction(regModelIndex, eyeFeatures = latestEyeFeatures) {
   var predictions = [];
 
   if (regs.length === 0) {
     console.log('regression not set, call setRegression()');
     return null;
   }
+
   for (var reg in regs) {
-    predictions.push(regs[reg].predict(latestEyeFeatures));
+    predictions.push(regs[reg].predict(eyeFeatures));
   }
+
   if (regModelIndex !== undefined) {
     return predictions[regModelIndex] === null ? null : {
       'x' : predictions[regModelIndex].x,
       'y' : predictions[regModelIndex].y,
-      'eyeFeatures': latestEyeFeatures
+      'eyeFeatures': eyeFeatures
     };
   } else {
     return predictions.length === 0 || predictions[0] === null ? null : {
       'x' : predictions[0].x,
       'y' : predictions[0].y,
-      'eyeFeatures': latestEyeFeatures,
+      'eyeFeatures': eyeFeatures,
       'all' : predictions
     };
   }
@@ -323,6 +325,7 @@ function gazePrepForGetGazeNow1() {
 
 async function gazePrepForGetGazeNow2() {
   latestEyeFeatures = await getPupilFeatures(videoElementCanvas, videoElementCanvas.width, videoElementCanvas.height);
+  return latestEyeFeatures;
 }
 
 async function loop() {
@@ -1341,59 +1344,61 @@ webgazer.getRegression = function() {
 };
 
 /**
+ * getGazeNow
  * Requests an immediate prediction
  * @return {object} prediction data object
  */
-webgazer.getCurrentPrediction = async function(regIndex = 0, wait = 0) {
-  // const framesNow = []
-  // const predictions = []
-  // 3 frames
-  // for (let frame = 0; frame < 3; frame++) {
-  //   framesNow.push(performance.now())
-  //   await gazePrep(true)
+webgazer.getCurrentPrediction = async function(regIndex = 0, wait = 150, frames = 5) {
+  let totalTimeStamps = 0
+  const eyeFeatures = []
+  const predictions = []
 
-  //   let prediction
-  //   for (let i = 0; i < 3; i++)
-  //     // TODO how to avoid this, given the regression model used?
-  //     prediction = await getPrediction()
+  for (let frame = 0; frame < frames; frame++) {
+    totalTimeStamps += performance.now()
+    gazePrepForGetGazeNow1()
+    eyeFeatures.push(await gazePrepForGetGazeNow2())
 
-  //   predictions.push({
-  //     x: prediction.x,
-  //     y: prediction.y,
-  //   })
-  // }
-  webgazer.params.getLatestVideoFrameTimestamp(performance.now())
-  gazePrepForGetGazeNow1()
+    await sleep(1000. / webgazer.params.framerate)
+  }
+  webgazer.params.getLatestVideoFrameTimestamp(Math.round(totalTimeStamps / frames))
 
   await sleep(wait)
 
-  await gazePrepForGetGazeNow2()
   let prediction
-  for (let i = 0; i < 10; i++)
-    prediction = await getPrediction()
+  for (const eyeFeature of eyeFeatures) {
+    for (let i = 0; i < 2; i++)
+      prediction = await getPrediction(undefined, eyeFeature)
 
-  // webgazer.params.getLatestVideoFrameTimestamp(
-  //   framesNow.reduce((a, b) => a + b) / framesNow.length
-  // ) // average timestamp of 3 frames
-  // const finalPredictionX = Math.round(
-  //   predictions.reduce((a, b) => a + b.x, 0) / predictions.length
-  // )
-  // const finalPredictionY = Math.round(
-  //   predictions.reduce((a, b) => a + b.y, 0) / predictions.length
-  // )
+    predictions.push(prediction)
+  }
+
+  const finalPredictionX = Math.round(
+    predictions.reduce((a, b) => {
+      if (b.x >= 0 && b.x <= window.innerWidth)
+        return a + b.x
+      else return a
+    }, 0) / predictions.length
+  )
+  const finalPredictionY = Math.round(
+    predictions.reduce((a, b) => {
+      if (b.y >= 0 && b.y <= window.innerHeight)
+        return a + b.y
+      else return a
+    }, 0) / predictions.length
+  )
 
   if (gazeDot) {
-    const boundedPrediction = util.bound({
-      x: prediction.x,
-      y: prediction.y,
-    })
-    gazeDot.style.left = `${boundedPrediction.x}px`
-    gazeDot.style.top = `${boundedPrediction.y}px`
+    // const boundedPrediction = util.bound({
+    //   x: finalPredictionX,
+    //   y: finalPredictionY,
+    // })
+    gazeDot.style.left = `${finalPredictionX}px`
+    gazeDot.style.top = `${finalPredictionY}px`
   }
 
   return {
-    x: prediction.x,
-    y: prediction.y,
+    x: finalPredictionX,
+    y: finalPredictionY,
   }
 };
 
