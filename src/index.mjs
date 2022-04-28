@@ -381,13 +381,13 @@ async function loop() {
         }
 
         gazeDot.style.opacity = '';
-        gazeDot.style.transform = `translate(${pred.x}px, ${pred.y}px)`;
+        gazeDot.style.left = `${pred.x}px`;
+        gazeDot.style.top = `${pred.y}px`;
       }
 
     }
   } else {
     if (gazeDot && !gazeDotPopped)
-      // gazeDot.style.transform = `translate(-15px, -15px)` // Move out of the display
       gazeDot.style.opacity = '0';
   }
 
@@ -642,14 +642,9 @@ async function init(initMode = 'all', stream) {
     // TODO Customizable width and height
     gazeDot.style.width = '10px'
     gazeDot.style.height = '10px'
-    gazeDot.style.left = '-5px';
-    gazeDot.style.top  = '-5px'; // Width and height are 10px by default
-    gazeDot.style.transform = `translate(-15px, -15px)`
-    // gazeDot.style.background = 'red';
-    // gazeDot.style.borderRadius = '100%';
-    // gazeDot.style.opacity = '0.5';
-    // gazeDot.style.width = '10px';
-    // gazeDot.style.height = '10px';
+    gazeDot.style.left = '-10px';
+    gazeDot.style.top  = '-10px'; // Width and height are 10px by default
+    gazeDot.style.transform = `translate(-5px, -5px)`
 
     document.body.appendChild(gazeDot);
 
@@ -877,7 +872,6 @@ webgazer.resume = async function() {
 
     gazeDot.style.backgroundColor = ''
     gazeDot.style.opacity = ''
-    // gazeDot.style.transform = `translate(-15px, -15px)`
   }
 
   await loop();
@@ -1039,7 +1033,6 @@ webgazer.popPredictionPoints = function() {
         // gazeDot.style.display = 'none'
         gazeDot.style.backgroundColor = ''
         gazeDot.style.opacity = ''
-        // gazeDot.style.transform = `translate(-15px, -15px)`
       }
     }, 50); // 20 * 50 = 1 second
   }
@@ -1394,7 +1387,8 @@ webgazer.getCurrentPrediction = async function(regIndex = 0, wait = 0) {
       x: prediction.x,
       y: prediction.y,
     })
-    gazeDot.style.transform = `translate(${boundedPrediction.x}px, ${boundedPrediction.y}px)`
+    gazeDot.style.left = `${boundedPrediction.x}px`
+    gazeDot.style.top = `${boundedPrediction.y}px`
   }
 
   return {
