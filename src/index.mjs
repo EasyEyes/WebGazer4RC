@@ -145,18 +145,19 @@ function checkEyesInValidationBox() {
     var xPositions = false;
     var yPositions = false;
 
-    //check if the x values for the left and right eye are within the
-    //validation box
-    if (eyeLX > leftBound && eyeLX < rightBound) {
-      if (eyeRX > leftBound && eyeRX < rightBound) {
+    // check if the x values for the left and right eye are within the
+    // validation box
+    // add the width when comparing against the rightBound (which is the left edge on the preview)
+    if (eyeLX > leftBound && eyeLX + latestEyeFeatures.left.width < rightBound) {
+      if (eyeRX > leftBound && eyeRX + latestEyeFeatures.right.width < rightBound) {
         xPositions = true;
       }
     }
 
     //check if the y values for the left and right eye are within the
     //validation box
-    if (eyeLY > topBound && eyeLY < bottomBound) {
-      if (eyeRY > topBound && eyeRY < bottomBound) {
+    if (eyeLY > topBound && eyeLY + latestEyeFeatures.left.height < bottomBound) {
+      if (eyeRY > topBound && eyeRY + latestEyeFeatures.right.height < bottomBound) {
         yPositions = true;
       }
     }
@@ -200,7 +201,7 @@ function getPupilFeatures(canvas, width, height) {
     return;
   }
   try {
-    return curTracker.getEyePatches(canvas, width, height);
+    return curTracker.getEyePatches(videoElement, canvas, width, height);
   } catch(err) {
     console.log("can't get pupil features ", err);
     return null;
@@ -280,7 +281,6 @@ async function loop() {
     latestGazeData = getPrediction();
     // Count time
     var elapsedTime = performance.now() - clockStart;
-
 
     // Draw face overlay
     if( webgazer.params.showFaceOverlay )
@@ -483,33 +483,24 @@ async function init(stream) {
   // create a video element container to enable customizable placement on the page
   videoContainerElement = document.createElement('div');
   videoContainerElement.id = webgazer.params.videoContainerId;
-  if (navigator.userAgent.indexOf("Safari") > -1) {
-    videoContainerElement.style.opacity = webgazer.params.showVideo ? '1': '0';
-    videoContainerElement.style.display = 'block';
-  } else {
-    videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
-  }
+
   videoContainerElement.style.position = 'fixed';
   videoContainerElement.style.top = topDist;
   videoContainerElement.style.left = leftDist;
   videoContainerElement.style.width = webgazer.params.videoViewerWidth + 'px';
   videoContainerElement.style.height = webgazer.params.videoViewerHeight + 'px';
-  
+  hideVideoElement(videoContainerElement);
+
   videoElement = document.createElement('video');
   videoElement.setAttribute('playsinline', '');
   videoElement.id = webgazer.params.videoElementId;
   videoElement.srcObject = stream;
   videoElement.autoplay = true;
-  if (navigator.userAgent.indexOf("Safari") > -1) {
-    videoElement.style.opacity = webgazer.params.showVideo ? '1': '0';
-    videoElement.style.display = 'block';
-  } else {
-    videoElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
-  }
   videoElement.style.position = 'absolute';
   // We set these to stop the video appearing too large when it is added for the very first time
   videoElement.style.width = webgazer.params.videoViewerWidth + 'px';
   videoElement.style.height = webgazer.params.videoViewerHeight + 'px';
+  hideVideoElement(videoElement);
   // videoElement.style.zIndex="-1";
 
   // Canvas for drawing video to pass to clm tracker
@@ -553,7 +544,7 @@ async function init(stream) {
   gazeDot.style.display = webgazer.params.showGazeDot ? 'block' : 'none';
   gazeDot.style.position = 'fixed';
   gazeDot.style.zIndex = 99999;
-  gazeDot.style.left = '-5px'; //'-999em';
+  gazeDot.style.left = '-5px';
   gazeDot.style.top  = '-5px';
   gazeDot.style.background = 'red';
   gazeDot.style.borderRadius = '100%';
@@ -564,21 +555,24 @@ async function init(stream) {
   // Add other preview/feedback elements to the screen once the video has shown and its parameters are initialized
   videoContainerElement.appendChild(videoElement);
   document.body.appendChild(videoContainerElement);
-  function setupPreviewVideo(e) {
+  const videoPreviewSetup = new Promise((res) => {
+    function setupPreviewVideo(e) {
 
-    // All video preview parts have now been added, so set the size both internally and in the preview window.
-    setInternalVideoBufferSizes( videoElement.videoWidth, videoElement.videoHeight );
-    webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight );
+      // All video preview parts have now been added, so set the size both internally and in the preview window.
+      setInternalVideoBufferSizes( videoElement.videoWidth, videoElement.videoHeight );
+      webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight );
 
-    videoContainerElement.appendChild(videoElementCanvas);
-    videoContainerElement.appendChild(faceOverlay);
-    videoContainerElement.appendChild(faceFeedbackBox);
-    document.body.appendChild(gazeDot);
+      videoContainerElement.appendChild(videoElementCanvas);
+      videoContainerElement.appendChild(faceOverlay);
+      videoContainerElement.appendChild(faceFeedbackBox);
+      document.body.appendChild(gazeDot);
 
-    // Run this only once, so remove the event listener
-    e.target.removeEventListener(e.type, setupPreviewVideo);
-  };
-  videoElement.addEventListener('timeupdate', setupPreviewVideo);
+      // Run this only once, so remove the event listener
+      e.target.removeEventListener(e.type, setupPreviewVideo);
+      res();
+    };
+    videoElement.addEventListener('loadeddata', setupPreviewVideo);
+  });
 
   addMouseEventListeners();
 
@@ -586,14 +580,15 @@ async function init(stream) {
   paused = false;
   clockStart = performance.now();
 
+  await videoPreviewSetup;
   await loop();
 }
 
 /**
  * Initializes navigator.mediaDevices.getUserMedia
  * depending on the browser capabilities
- * 
- * @return Promise 
+ *
+ * @return Promise
  */
 function setUserMediaVariable(){
 
@@ -656,7 +651,7 @@ webgazer.begin = function(onFail) {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia( webgazer.params.camConstraints );
-      init(stream);
+      await init(stream);
       resolve(webgazer);
     } catch(err) {
       onFail();
@@ -714,6 +709,7 @@ webgazer.end = function() {
 
   //remove video element and canvas
   videoContainerElement.remove();
+  gazeDot.remove();
 
   return webgazer;
 };
@@ -768,23 +764,33 @@ webgazer.showVideoPreview = function(val) {
 }
 
 /**
+ * hides a video element (videoElement or videoContainerElement)
+ * uses display = 'none' for all browsers except Safari, which uses opacity = '1'
+ * because Safari optimizes out video element if display = 'none'
+ * @param {Object} element
+ * @return {null}
+ */
+function hideVideoElement(val) {
+  if (navigator.vendor && navigator.vendor.indexOf('Apple') > -1) {
+    val.style.opacity = webgazer.params.showVideo ? '1': '0';
+    val.style.display = 'block';
+  } else {
+    val.style.display = webgazer.params.showVideo ? 'block' : 'none';
+  }
+}
+
+/**
  * Set whether the camera video preview is visible or not (default true).
  * @param {*} bool
  * @return {webgazer} this
  */
 webgazer.showVideo = function(val) {
   webgazer.params.showVideo = val;
-  if (navigator.userAgent.indexOf("Safari") > -1) {
-    videoElement.style.opacity = webgazer.params.showVideo ? '1': '0';
-    videoElement.style.display = 'block';
-  } else {
-    videoElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
+  if (videoElement) {
+    hideVideoElement(videoElement);
   }
-  if (navigator.userAgent.indexOf("Safari") > -1) {
-    videoContainerElement.style.opacity = webgazer.params.showVideo ? '1': '0';
-    videoContainerElement.style.display = 'block';
-  } else {
-    videoContainerElement.style.display = webgazer.params.showVideo ? 'block' : 'none';
+  if (videoContainerElement) {
+    hideVideoElement(videoContainerElement);
   }
   return webgazer;
 };
@@ -832,10 +838,10 @@ webgazer.showPredictionPoints = function(val) {
 /**
  * Set whether previous calibration data (from localforage) should be loaded.
  * Default true.
- * 
+ *
  * NOTE: Should be called before webgazer.begin() -- see www/js/main.js for example
- * 
- * @param val 
+ *
+ * @param val
  * @returns {webgazer} this
  */
 webgazer.saveDataAcrossSessions = function(val) {
