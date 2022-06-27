@@ -789,29 +789,32 @@ webgazer._begin = function (videoOnly, onVideoFail) {
     return new Promise(async (resolve, reject) => {
       let stream;
       try {
-        if (typeof navigator.mediaDevices !== 'undefined')
-          navigator.mediaDevices.enumerateDevices().then(async (sources) => {
-            _gotSources(sources);
-            if (videoInputs.length === 0) {
-              onVideoFail(videoInputs);
-              throw 'No camera';
-            }
+        if (typeof navigator.mediaDevices !== 'undefined') {
+          await navigator.mediaDevices.getUserMedia({ video: true })
+          if (typeof navigator.mediaDevices.enumerateDevices === 'function')
+            navigator.mediaDevices.enumerateDevices().then(async (sources) => {
+              _gotSources(sources);
+              if (videoInputs.length === 0) {
+                onVideoFail(videoInputs);
+                throw 'We can\'t find any video input devices.';
+              }
 
-            try {
-              stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
-            } catch (error) {
-              onVideoFail(videoInputs);
-              throw error;
-            }
+              try {
+                stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
+              } catch (error) {
+                onVideoFail(videoInputs);
+                throw error;
+              }
 
-            init(videoOnly ? 'video' : 'all', stream).then(() => {
-              if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
+              init(videoOnly ? 'video' : 'all', stream).then(() => {
+                if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
+              });
+              ////
+              webgazer.params.videoIsOn = true
+              ////
+              if (!videoOnly) resolve(webgazer);
             });
-            ////
-            webgazer.params.videoIsOn = true
-            ////
-            if (!videoOnly) resolve(webgazer);
-          });
+        }
       } catch(err) {
         console.log(err);
         videoElement = null;
