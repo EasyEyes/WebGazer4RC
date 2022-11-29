@@ -790,7 +790,21 @@ webgazer._begin = function (videoOnly, onVideoFail) {
       let stream;
       try {
         if (typeof navigator.mediaDevices !== 'undefined') {
-          await navigator.mediaDevices.getUserMedia({ video: true })
+          
+          // prefer FaceTime camera on MacOS devices
+          let preferredDeviceId = undefined
+          const availableDevices = await navigator.mediaDevices.enumerateDevices()
+          if (availableDevices.length > 1)
+            for (let d of availableDevices)
+              if (d.label.includes('FaceTime'))
+                preferredDeviceId = d.deviceId
+
+          await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'user',
+              deviceId: preferredDeviceId,
+            } 
+          })
           if (typeof navigator.mediaDevices.enumerateDevices === 'function')
             navigator.mediaDevices.enumerateDevices().then(async (sources) => {
               _gotSources(sources);
