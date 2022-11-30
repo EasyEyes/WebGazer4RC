@@ -762,12 +762,22 @@ const _setUpActiveCameraSwitch = (inputs) => {
 
 const _gotSources = (sources) => {
   videoInputs = []
+  let preferredLabel, preferredDeviceId
+
   sources.forEach(device => {
     if (device.kind === 'videoinput') videoInputs.push(device)
+    
+    // detect and prefer FaceTime HD Camera
+    if (device.label.includes('FaceTime')) {
+      preferredLabel = device.label
+      preferredDeviceId = device.deviceId
+    }
   });
 
-  webgazer.params.activeCamera.label = videoInputs[0].label
-  webgazer.params.activeCamera.id = videoInputs[0].deviceId
+  if (videoInputs.length) {
+    webgazer.params.activeCamera.label = preferredLabel || videoInputs[0].label
+    webgazer.params.activeCamera.id = preferredDeviceId || videoInputs[0].deviceId
+  }
 }
 
 const _setUpConstraints = (originalConstraints) => {
@@ -788,52 +798,59 @@ webgazer._begin = function (videoOnly, onVideoFail) {
 
     return new Promise(async (resolve, reject) => {
       let stream;
+
       try {
-        if (typeof navigator.mediaDevices !== 'undefined') {
-          
-          // prefer FaceTime camera on MacOS devices
-          let preferredDeviceId = undefined
+        if (
+          typeof navigator.mediaDevices !== 'undefined' &&
+          typeof navigator.mediaDevices.enumerateDevices === 'function'
+        ) {
           const availableDevices = await navigator.mediaDevices.enumerateDevices()
-          if (availableDevices.length > 1)
-            for (let d of availableDevices)
-              if (d.label.includes('FaceTime'))
-                preferredDeviceId = d.deviceId
-
-          await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: 'user',
-              deviceId: preferredDeviceId,
-            } 
-          })
-          if (typeof navigator.mediaDevices.enumerateDevices === 'function')
-            navigator.mediaDevices.enumerateDevices().then(async (sources) => {
-              _gotSources(sources);
-              if (videoInputs.length === 0) {
-                onVideoFail(videoInputs);
-                throw 'We can\'t find any video input devices.';
-              }
-
-              try {
-                stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
-              } catch (error) {
-                onVideoFail(videoInputs);
-                throw error;
-              }
-
-              init(videoOnly ? 'video' : 'all', stream).then(() => {
-                if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
-              });
-              ////
-              webgazer.params.videoIsOn = true
-              ////
-              if (!videoOnly) resolve(webgazer);
+          // pick the default source
+          _gotSources(availableDevices)
+          // no valid video input devices
+          if (videoInputs.length === 0) {
+            onVideoFail(videoInputs);
+            throw JSON.stringify({
+              message: 'We can\'t find any video input devices.',
+              devices: availableDevices
             });
+          }
+
+          // await navigator.mediaDevices.getUserMedia({
+          //   video: {
+          //     facingMode: 'user',
+          //     deviceId: preferredDeviceId,
+          //   } 
+          // })
+
+          try {
+            stream = await navigator.mediaDevices.getUserMedia( _setUpConstraints(webgazer.params.camConstraints) );
+          } catch (error) {
+            onVideoFail(videoInputs);
+            throw error;
+          }
+
+          init(videoOnly ? 'video' : 'all', stream).then(() => {
+            if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs)
+          });
+          ////
+          webgazer.params.videoIsOn = true
+          ////
+          if (!videoOnly) resolve(webgazer);
+        } else {
+          onVideoFail([]);
         }
       } catch(err) {
-        console.log(err);
         videoElement = null;
         stream = null;
+
+        onVideoFail([]);
+        
         reject(err);
+        throw JSON.stringify({
+          error: err,
+          devices: await navigator.mediaDevices.enumerateDevices()
+        });
       }
     });
   } else {
