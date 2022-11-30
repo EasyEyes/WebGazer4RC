@@ -20,9 +20,12 @@
   ],
   "dependencies": {
     "@tensorflow-models/facemesh": "^0.0.5",
-    "@tensorflow/tfjs": "^3.18.0",
+    "@tensorflow/tfjs": "^3.21.0",
     "localforage": "^1.10.0",
     "numeric": "1.2.6",
     "regression": "2.0.1"
+  },
+  "devDependencies": {
+    "encoding": "^0.1.13"
   }
 }
