@@ -7,9 +7,9 @@ import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detec
 const TFFaceMesh = function() {
   //Backend options are webgl, wasm, and CPU.
   //For recent laptops WASM is better than WebGL.
-  this.model = faceLandmarksDetection.load(
-    faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
-    { maxFaces: 1 }
+  this.model = faceLandmarksDetection.createDetector(
+    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+    { runtime: 'tfjs' }
   );
   this.predictionReady = false;
 };
@@ -36,14 +36,13 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
 
   // Pass in a video stream (or an image, canvas, or 3D tensor) to obtain an
   // array of detected faces from the MediaPipe graph.
-  const predictions = await model.estimateFaces({
-    input: video,
-    returnTensors: false,
+  const predictions = await model.estimateFaces(imageCanvas, {
     flipHorizontal: false,
-    predictIrises: false,
   });
 
-  if (predictions.length == 0){
+  console.log('predictions:', predictions);
+
+  if (predictions.length === 0){
     return false;
   }
 
@@ -59,22 +58,22 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
   const [leftBBox, rightBBox] = [
     // left
     {
-      eyeTopArc: prediction.annotations.leftEyeUpper0,
-      eyeBottomArc: prediction.annotations.leftEyeLower0
+      eyeTopArc: [466, 388, 387, 386, 385, 384, 398].map(ind => prediction.keypoints[ind]),
+      eyeBottomArc: [263, 249, 390, 373, 374, 380, 381, 382, 362].map(ind => prediction.keypoints[ind])
     },
     // right
     {
-      eyeTopArc: prediction.annotations.rightEyeUpper0,
-      eyeBottomArc: prediction.annotations.rightEyeLower0
+      eyeTopArc: [246, 161, 160, 159, 158, 157, 173].map(ind => prediction.keypoints[ind]),
+      eyeBottomArc: [33, 7, 163, 144, 145, 153, 154, 155, 133].map(ind => prediction.keypoints[ind])
     },
   ].map(({ eyeTopArc, eyeBottomArc }) => {
     const topLeftOrigin = {
-      x: Math.round(Math.min(...eyeTopArc.map(v => v[0]))),
-      y: Math.round(Math.min(...eyeTopArc.map(v => v[1]))),
+      x: Math.round(Math.min(...eyeTopArc.map(v => v.x))),
+      y: Math.round(Math.min(...eyeTopArc.map(v => v.y))),
     };
     const bottomRightOrigin = {
-      x: Math.round(Math.max(...eyeBottomArc.map(v => v[0]))),
-      y: Math.round(Math.max(...eyeBottomArc.map(v => v[1]))),
+      x: Math.round(Math.max(...eyeBottomArc.map(v => v.x))),
+      y: Math.round(Math.max(...eyeBottomArc.map(v => v.y))),
     };
 
     return {

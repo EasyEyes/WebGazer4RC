@@ -29,23 +29,18 @@ util.Eye = function(patch, imagex, imagey, width, height) {
  * @returns {Array.<T>} The eyes gray level histogram
  */
 util.getEyeFeats = function(eyes) {
-    let process = (eye) => {
-        let resized = this.resizeEye(eye, resizeWidth, resizeHeight);
-        let gray = this.grayscale(resized.data, resized.width, resized.height);
-        let hist = [];
-        this.equalizeHistogram(gray, 5, hist);
-        return hist;
-    };
+    var resizedLeft = this.resizeEye(eyes.left, resizeWidth, resizeHeight);
+    var resizedRight = this.resizeEye(eyes.right, resizeWidth, resizeHeight);
 
-    if (webgazer.params.trackEye == 'left') {
-        return process(eyes.left);
-    }
-    else if (webgazer.params.trackEye == 'right') {
-        return process(eyes.right);
-    }
-    else {
-        return [].concat(process(eyes.left), process(eyes.right));
-    }
+    var leftGray = this.grayscale(resizedLeft.data, resizedLeft.width, resizedLeft.height);
+    var rightGray = this.grayscale(resizedRight.data, resizedRight.width, resizedRight.height);
+
+    var histLeft = [];
+    this.equalizeHistogram(leftGray, 5, histLeft);
+    var histRight = [];
+    this.equalizeHistogram(rightGray, 5, histRight);
+
+    return histLeft.concat(histRight);
 }
 
 //Data Window class

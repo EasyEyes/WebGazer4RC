@@ -710,7 +710,6 @@ async function init(initMode = "all", stream) {
     clockStart = performance.now();
   }
 
-  await videoPreviewSetup;
   await loop();
 }
 
