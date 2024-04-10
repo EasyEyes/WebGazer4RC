@@ -40,8 +40,6 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
     flipHorizontal: false,
   });
 
-  console.log('predictions:', predictions);
-
   if (predictions.length === 0){
     return false;
   }
