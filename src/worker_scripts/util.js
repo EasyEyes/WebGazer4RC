@@ -368,8 +368,9 @@
     self.webgazer.util.KalmanFilter.prototype.update = function(z) {
 
       // Here, we define all the different matrix operations we will need
-      var add = numeric.add, sub = numeric.sub, inv = numeric.inv, identity = numeric.identity;
-      var mult = webgazer.mat.mult, transpose = webgazer.mat.transpose;
+      const {
+          add, sub, mult, inv, identity, transpose,
+      } = mat;
       //TODO cache variables like the transpose of H
 
       // prediction: X = F * X  |  P = F * P * F' + Q
