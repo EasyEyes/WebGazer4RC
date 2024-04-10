@@ -1,6 +1,6 @@
 import util from './util.mjs';
 import util_regression from './util_regression.mjs';
-import params from './params.mjs'
+import params from './params.mjs';
 
 const reg = {};
 
@@ -63,8 +63,8 @@ reg.RidgeWeightedReg.prototype.predict = function(eyesObj) {
                 weightedEyeFeats[trueIndex] = [val];
             }
         }
-        weightedXArray[trueIndex] = this.screenXClicksArray.get(i).slice(0, this.screenXClicksArray.get(i).length);
-        weightedYArray[trueIndex] = this.screenYClicksArray.get(i).slice(0, this.screenYClicksArray.get(i).length);
+        weightedXArray[i] = this.screenXClicksArray.get(i).slice(0, this.screenXClicksArray.get(i).length);
+        weightedYArray[i] = this.screenYClicksArray.get(i).slice(0, this.screenYClicksArray.get(i).length);
         weightedXArray[i][0] = weightedXArray[i][0] * weight;
         weightedYArray[i][0] = weightedYArray[i][0] * weight;
     }

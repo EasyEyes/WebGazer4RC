@@ -1,6 +1,6 @@
 {
   "name": "webgazer",
-  "version": "2.1.1",
+  "version": "3.3.0",
   "private": "true",
   "repository": {
     "type": "git",
@@ -16,13 +16,13 @@
   "keywords": [
     "webgazer",
     "eyetracking",
-    "webcam"
+    "webcam",
+    "online"
   ],
   "dependencies": {
-    "@tensorflow-models/facemesh": "^0.0.5",
-    "@tensorflow/tfjs": "^3.21.0",
+    "@tensorflow-models/face-landmarks-detection": "^1.0.5",
+    "@tensorflow/tfjs": "^4.17.0",
     "localforage": "^1.10.0",
-    "numeric": "1.2.6",
     "regression": "2.0.1"
   },
   "devDependencies": {

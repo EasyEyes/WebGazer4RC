@@ -24,6 +24,7 @@ const params = {
   storingPoints: false,
   ////
   videoIsOn: false,
+  trackEye: 'both',
 };
 
 export default params;

@@ -1,7 +1,7 @@
 import util from './util.mjs';
-import numeric from 'numeric';
 import util_regression from './util_regression.mjs';
 import params from './params.mjs';
+import mat from './mat.mjs';
 
 const reg = {};
 
@@ -61,7 +61,7 @@ reg.RidgeRegThreaded.prototype.init = function() {
               [1/2, 0,    1,   0],  
               [0,  1/2,  0,   1]];// * delta_t  
     var delta_t = 1/10; // The amount of time between frames    
-    Q = numeric.mul(Q, delta_t);    
+    Q = mat.multScalar(Q, delta_t);    
 
     var H = [ [1, 0, 0, 0, 0, 0],   
               [0, 1, 0, 0, 0, 0],   
@@ -72,9 +72,9 @@ reg.RidgeRegThreaded.prototype.init = function() {
     var pixel_error = 47; //We will need to fine tune this value [20200611 xk] I just put a random value here   
 
     //This matrix represents the expected measurement error 
-    var R = numeric.mul(numeric.identity(2), pixel_error);  
+    var R = mat.multScalar(mat.identity(2), pixel_error);  
 
-    var P_initial = numeric.mul(numeric.identity(4), 0.0001); //Initial covariance matrix   
+    var P_initial = mat.multScalar(mat.identity(4), 0.0001); //Initial covariance matrix   
     var x_initial = [[500], [500], [0], [0]]; // Initial measurement matrix 
 
     this.kalman = new util_regression.KalmanFilter(F, H, Q, R, P_initial, x_initial);  
