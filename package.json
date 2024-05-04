@@ -21,7 +21,7 @@
   ],
   "dependencies": {
     "@tensorflow-models/face-landmarks-detection": "^1.0.5",
-    "@tensorflow/tfjs": "^4.19.0",
+    "@tensorflow/tfjs": "^4.17.0",
     "localforage": "^1.10.0",
     "regression": "2.0.1"
   },
