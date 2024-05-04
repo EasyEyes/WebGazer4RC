@@ -1,6 +1,3 @@
-import mat from './mat.mjs';
-import params from './params.mjs';
-
 const util = {};
 
 var resizeWidth = 10;
