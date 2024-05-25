@@ -1,5 +1,5 @@
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
-
+import { useFullRangeModel } from './useFullRangeModel.mjs';
 /**
  * Constructor of TFFaceMesh object
  * @constructor
@@ -9,7 +9,9 @@ const TFFaceMesh = function() {
   //For recent laptops WASM is better than WebGL.
   this.model = faceLandmarksDetection.createDetector(
     faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-    { runtime: 'tfjs' }
+    { runtime: 'tfjs',
+      detectorModelUrl:"https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1",
+    }
   );
   this.predictionReady = false;
 };
@@ -33,6 +35,7 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
 
   // Load the MediaPipe facemesh model.
   const model = await this.model;
+  useFullRangeModel(model);
 
   // Pass in a video stream (or an image, canvas, or 3D tensor) to obtain an
   // array of detected faces from the MediaPipe graph.
