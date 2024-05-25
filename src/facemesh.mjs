@@ -50,9 +50,10 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
   // Save positions to global variable
   this.positionsArray = predictions[0].keypoints;
   const prediction = predictions[0]
-  const positions = this.positionsArray;
+  // const positions = this.positionsArray;
 
-  const { scaledMesh } = predictions[0];
+  // const { scaledMesh } = predictions[0];
+
   // Keypoints indexes are documented at
   // https://github.com/tensorflow/tfjs-models/blob/118d4727197d4a21e2d4691e134a7bc30d90deee/face-landmarks-detection/mesh_map.jpg
   // https://stackoverflow.com/questions/66649492/how-to-get-specific-landmark-of-face-like-lips-or-eyes-using-tensorflow-js-face
