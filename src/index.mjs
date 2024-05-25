@@ -212,7 +212,16 @@ function checkEyesInValidationBox() {
     } else {
       faceFeedbackBox.style.border = "solid red 4px";
     }
-  } else faceFeedbackBox.style.border = "solid red 4px";
+  } else {
+    if(!latestEyeFeatures) {
+      /*
+      sometimes latestEyeFeatures is false because the length 
+      of "predictions" inside "getEyePatches" is zero (no face detected by the model) even 
+      though the face is in the camera view. So this stops the red border from appearing in that case
+      */
+      faceFeedbackBox.style.border = "solid gray 2px";
+    }
+    else faceFeedbackBox.style.border = "solid red 4px";}
 }
 
 /**

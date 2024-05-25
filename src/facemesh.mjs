@@ -45,7 +45,7 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
   }
 
   // Save positions to global variable
-  this.positionsArray = predictions[0].scaledMesh;
+  this.positionsArray = predictions[0].keypoints;
   const prediction = predictions[0]
   const positions = this.positionsArray;
 
