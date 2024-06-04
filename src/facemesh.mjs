@@ -17,7 +17,6 @@ const TFFaceMesh = function() {
   this.modelLoaded = false;
 };
 
-//function to load the model
 TFFaceMesh.prototype.loadModel = async function() {
   if (this.modelLoaded) return;
   this.model = await this.model;
