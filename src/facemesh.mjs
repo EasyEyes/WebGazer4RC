@@ -14,7 +14,16 @@ const TFFaceMesh = function() {
     }
   );
   this.predictionReady = false;
+  this.modelLoaded = false;
 };
+
+//function to load the model
+TFFaceMesh.prototype.loadModel = async function() {
+  if (this.modelLoaded) return;
+  this.model = await this.model;
+  useFullRangeModel(this.model);
+  this.modelLoaded = true;
+}
 
 // Global variable for face landmark positions array
 TFFaceMesh.prototype.positionsArray = null;
@@ -34,8 +43,8 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
   }
 
   // Load the MediaPipe facemesh model.
-  const model = await this.model;
-  useFullRangeModel(model);
+  const model = this.model;
+  // useFullRangeModel(model);
 
   // Pass in a video stream (or an image, canvas, or 3D tensor) to obtain an
   // array of detected faces from the MediaPipe graph.

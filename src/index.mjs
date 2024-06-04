@@ -719,6 +719,8 @@ async function init(initMode = "all", stream) {
     clockStart = performance.now();
   }
 
+  //load the distance model
+  await curTracker.loadModel();
   await loop();
 }
 
