@@ -17,11 +17,35 @@ const TFFaceMesh = function() {
   this.modelLoaded = false;
 };
 
+const _modelLoadingInProgress = { current: false, resolves: [] };
+
 TFFaceMesh.prototype.loadModel = async function() {
   if (this.modelLoaded) return;
-  this.model = await this.model;
-  useFullRangeModel(this.model);
-  this.modelLoaded = true;
+  
+  if (_modelLoadingInProgress.current) {
+    // add a promise to the list of promises to be resolved when the model is loaded
+    const promise = new Promise((resolve) => {
+      _modelLoadingInProgress.resolves.push(resolve);
+    });
+
+    return await promise;
+  }
+  
+  _modelLoadingInProgress.current = true;
+
+  try {
+    this.model = await this.model;
+    useFullRangeModel(this.model);
+    this.modelLoaded = true;
+
+    // resolve all promises that were added while the model was loading
+    _modelLoadingInProgress.resolves.forEach((resolve) => resolve());
+  } finally {
+    _modelLoadingInProgress.current = false;
+    _modelLoadingInProgress.resolves = [];
+  }
+
+  return;
 }
 
 // Global variable for face landmark positions array
