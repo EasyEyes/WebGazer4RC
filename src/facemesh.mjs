@@ -1,18 +1,24 @@
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
 import { useFullRangeModel } from './useFullRangeModel.mjs';
+
+const isOnline = () => {
+  return navigator.onLine
+}
+
 /**
  * Constructor of TFFaceMesh object
  * @constructor
  * */
 const TFFaceMesh = function() {
-  //Backend options are webgl, wasm, and CPU.
-  //For recent laptops WASM is better than WebGL.
   this.model = faceLandmarksDetection.createDetector(
     faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-    { runtime: 'tfjs',
-      detectorModelUrl:"https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1",
+    { 
+      runtime: 'tfjs',
+      detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
+      landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json'
     }
   );
+
   this.predictionReady = false;
   this.modelLoaded = false;
 };
