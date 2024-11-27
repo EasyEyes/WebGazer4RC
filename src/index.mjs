@@ -32,6 +32,7 @@ webgazer.reg.RidgeWeightedReg = ridgeRegWeighted.RidgeWeightedReg;
 webgazer.reg.RidgeRegThreaded = ridgeRegThreaded.RidgeRegThreaded;
 webgazer.util = util;
 webgazer.params = params;
+webgazer.videoParamsToReport = {height: 0, width: 0};
 
 //PRIVATE VARIABLES
 
@@ -896,6 +897,9 @@ webgazer._begin = function (videoOnly, onVideoFail) {
             stream = await navigator.mediaDevices.getUserMedia(
               _setUpConstraints(webgazer.params.camConstraints)
             );
+            const videoTrack = stream.getVideoTracks()[0];
+            const { height, width } = videoTrack.getSettings();
+            webgazer.videoParamsToReport = { height, width };
           } catch (error) {
             onVideoFail(videoInputs);
             throw error;
@@ -1225,7 +1229,7 @@ webgazer.setCameraConstraints = async function (constraints) {
         videoStream = stream;
         videoElement.srcObject = stream;
         setInternalVideoBufferSizes(videoSettings.width, videoSettings.height);
-        console.log("New constraints applied");
+        webgazer.videoParamsToReport = { height: videoSettings.height, width: videoSettings.width };
       }, 1500);
     } catch (err) {
       console.log(err);
