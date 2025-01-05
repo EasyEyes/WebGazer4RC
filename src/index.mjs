@@ -128,8 +128,8 @@ var defaults = {
 webgazer.computeValidationBoxSize = function () {
   var vw = videoElement.videoWidth;
   var vh = videoElement.videoHeight;
-  var pw = parseInt(videoElement.style.width);
-  var ph = parseInt(videoElement.style.height);
+  var pw = parseInt(Math.min(videoElement.offsetWidth,videoContainerElement.offsetWidth));
+  var ph = parseInt(videoContainerElement.offsetHeight);
 
   // Find the size of the box.
   // Pick the smaller of the two video preview sizes
@@ -1280,7 +1280,7 @@ webgazer.setVideoViewerSize = function (w, h) {
   webgazer.params.videoViewerHeight = h;
 
   // Change the video viewer
-  videoElement.style.width = w + "px";
+  videoElement.style.width = "auto" //w + "px";
   videoElement.style.height = h + "px";
 
   // Change video container
