@@ -906,7 +906,7 @@ webgazer._begin = function (videoOnly, onVideoFail) {
           }
 
           init(videoOnly ? "video" : "all", stream).then(() => {
-            if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs);
+            // if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs);
           });
           ////
           webgazer.params.videoIsOn = true;
