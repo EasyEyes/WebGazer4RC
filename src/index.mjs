@@ -831,21 +831,37 @@ const _setUpActiveCameraSwitch = (inputs) => {
 const _gotSources = (sources) => {
   videoInputs = [];
   let preferredLabel, preferredDeviceId;
+  let nonIPhoneCameras = [];
 
   sources.forEach((device) => {
-    if (device.kind === "videoinput") videoInputs.push(device);
-
-    // detect and prefer FaceTime HD Camera
-    if (device.label.includes("FaceTime")) {
-      preferredLabel = device.label;
-      preferredDeviceId = device.deviceId;
+    if (device.kind === "videoinput") {
+      videoInputs.push(device);
+      
+      // Separate FaceTime cameras and non-iPhone cameras
+      if (device.label.includes("FaceTime")) {
+        preferredLabel = device.label;
+        preferredDeviceId = device.deviceId;
+      } else if (!device.label.includes("iPhone")) {
+        // Only include non-iPhone cameras as fallback
+        nonIPhoneCameras.push(device);
+      }
     }
   });
 
   if (videoInputs.length) {
-    webgazer.params.activeCamera.label = preferredLabel || videoInputs[0].label;
-    webgazer.params.activeCamera.id =
-      preferredDeviceId || videoInputs[0].deviceId;
+    // If we found a FaceTime camera, use it
+    if (preferredLabel && preferredDeviceId) {
+      webgazer.params.activeCamera.label = preferredLabel;
+      webgazer.params.activeCamera.id = preferredDeviceId;
+    } else if (nonIPhoneCameras.length > 0) {
+      // Use the first non-iPhone camera as fallback
+      webgazer.params.activeCamera.label = nonIPhoneCameras[0].label;
+      webgazer.params.activeCamera.id = nonIPhoneCameras[0].deviceId;
+    } else {
+      // Last resort: use any camera (including iPhone)
+      webgazer.params.activeCamera.label = videoInputs[0].label;
+      webgazer.params.activeCamera.id = videoInputs[0].deviceId;
+    }
   }
 };
 
