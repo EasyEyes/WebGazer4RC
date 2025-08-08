@@ -15,8 +15,15 @@ const params = {
   showFaceOverlay: true,
   showFaceFeedbackBox: true,
   showGazeDot: true,
-  //setting high width and height to get maximum resolution from the webcam
-  camConstraints: { video: { width: { min: 320, ideal: 7680 }, height: { min: 240, ideal: 4320,  }, facingMode: "user" } },
+  //setting high width and height to get maximum resolution from the webcam with landscape enforcement
+  camConstraints: { 
+    video: { 
+      width: { min: 640, ideal: 1920, max: 7680 }, 
+      height: { min: 360, ideal: 1080, max: 4320 }, 
+      aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+      facingMode: "user" 
+    } 
+  },
   dataTimestep: 50,
   showVideoPreview: true,
   applyKalmanFilter: true,

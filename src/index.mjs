@@ -630,6 +630,17 @@ async function init(initMode = "all", stream) {
     // We set these to stop the video appearing too large when it is added for the very first time
     videoElement.style.width = webgazer.params.videoViewerWidth + "px";
     videoElement.style.height = webgazer.params.videoViewerHeight + "px";
+    
+    // Enforce landscape orientation for video element
+    videoElement.addEventListener('loadedmetadata', function() {
+      if (videoElement.videoWidth < videoElement.videoHeight) {
+        // If video is portrait, rotate it to landscape
+        videoElement.style.transform = videoElement.style.transform + ' rotate(90deg)';
+        // Adjust container size for rotated video
+        videoContainerElement.style.width = webgazer.params.videoViewerHeight + "px";
+        videoContainerElement.style.height = webgazer.params.videoViewerWidth + "px";
+      }
+    });
 
     // Canvas for drawing video to pass to clm tracker
     videoElementCanvas = document.createElement("canvas");
@@ -867,11 +878,20 @@ const _gotSources = (sources) => {
 
 const _setUpConstraints = (originalConstraints) => {
   if (!webgazer.params.activeCamera.id) return originalConstraints;
+  
+  // Enforce landscape orientation
+  const landscapeConstraints = {
+    ...originalConstraints.video,
+    deviceId: webgazer.params.activeCamera.id,
+    // Ensure landscape aspect ratio (width > height)
+    aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+    // Set minimum width to be greater than minimum height
+    width: { min: 640, ideal: 1920, max: 7680 },
+    height: { min: 360, ideal: 1080, max: 4320 }
+  };
+  
   return {
-    video: {
-      ...originalConstraints.video,
-      deviceId: webgazer.params.activeCamera.id,
-    },
+    video: landscapeConstraints,
   };
 };
 
@@ -915,7 +935,29 @@ webgazer._begin = function (videoOnly, onVideoFail) {
             );
             const videoTrack = stream.getVideoTracks()[0];
             const { height, width } = videoTrack.getSettings();
-            webgazer.videoParamsToReport = { height, width };
+            
+            // Enforce landscape orientation if video is in portrait
+            if (width < height) {
+              try {
+                // Try to apply landscape constraints
+                await videoTrack.applyConstraints({
+                  width: { min: 640, ideal: 1920, max: 7680 },
+                  height: { min: 360, ideal: 1080, max: 4320 },
+                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+                });
+                // Get updated settings
+                const newSettings = videoTrack.getSettings();
+                webgazer.videoParamsToReport = { 
+                  height: newSettings.height, 
+                  width: newSettings.width 
+                };
+              } catch (constraintError) {
+                console.warn('Could not enforce landscape orientation:', constraintError);
+                webgazer.videoParamsToReport = { height, width };
+              }
+            } else {
+              webgazer.videoParamsToReport = { height, width };
+            }
           } catch (error) {
             onVideoFail(videoInputs);
             throw error;
@@ -1225,7 +1267,21 @@ webgazer.applyKalmanFilter = function (val) {
  */
 webgazer.setCameraConstraints = async function (constraints) {
   // var videoTrack, videoSettings;
-  webgazer.params.camConstraints = constraints;
+  
+  // Enforce landscape orientation in constraints
+  const landscapeConstraints = {
+    ...constraints,
+    video: {
+      ...constraints.video,
+      // Ensure landscape aspect ratio
+      aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+      // Set minimum width to be greater than minimum height
+      width: { min: 640, ideal: 1920, max: 7680 },
+      height: { min: 360, ideal: 1080, max: 4320 }
+    }
+  };
+  
+  webgazer.params.camConstraints = landscapeConstraints;
 
   // If the camera stream is already up...
   if (videoStream) {
@@ -1242,6 +1298,20 @@ webgazer.setCameraConstraints = async function (constraints) {
       setTimeout(() => {
         const videoTrack = stream.getVideoTracks()[0];
         const videoSettings = videoTrack.getSettings();
+        
+        // Enforce landscape orientation if video is in portrait
+        if (videoSettings.width < videoSettings.height) {
+          try {
+            videoTrack.applyConstraints({
+              width: { min: 640, ideal: 1920, max: 7680 },
+              height: { min: 360, ideal: 1080, max: 4320 },
+              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+            });
+          } catch (constraintError) {
+            console.warn('Could not enforce landscape orientation:', constraintError);
+          }
+        }
+        
         videoStream = stream;
         videoElement.srcObject = stream;
         setInternalVideoBufferSizes(videoSettings.width, videoSettings.height);
