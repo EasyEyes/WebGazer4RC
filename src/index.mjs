@@ -59,11 +59,17 @@ var yPast50 = new Array(50);
 var clockStart = performance.now();
 var latestEyeFeatures = null;
 var latestGazeData = null;
+
+// FPS throttling for main loop
+const targetLoopFPS = 30;
+const loopFrameInterval = 1000 / targetLoopFPS;
+let lastLoopFrameTime = 0;
+
 /* -------------------------------------------------------------------------- */
 webgazer.params.paused = false;
 
 webgazer.params.greedyLearner = false;
-webgazer.params.framerate = 60;
+webgazer.params.framerate = 30;
 webgazer.params.showGazeDot = false;
 
 webgazer.params.getLatestVideoFrameTimestamp = () => {};
@@ -389,67 +395,72 @@ async function gazePrepForGetGazeNow2() {
   return latestEyeFeatures;
 }
 
-async function loop() {
+async function loop(currentTime) {
   _now = window.performance.now();
 
-  if (webgazer.params.videoIsOn) {
-    // [20200617 XK] TODO: there is currently lag between the camera input and the face overlay. This behavior
-    // is not seen in the facemesh demo. probably need to optimize async implementation. I think the issue lies
-    // in the implementation of getPrediction().
+  // Throttle the entire loop to 30fps
+  if (currentTime - lastLoopFrameTime >= loopFrameInterval) {
+    if (webgazer.params.videoIsOn) {
+      // [20200617 XK] TODO: there is currently lag between the camera input and the face overlay. This behavior
+      // is not seen in the facemesh demo. probably need to optimize async implementation. I think the issue lies
+      // in the implementation of getPrediction().
 
-    // Paint the latest video frame into the canvas which will be analyzed by WebGazer
-    // [20180729 JT] Why do we need to do this? clmTracker does this itself _already_, which is just duplicating the work.
-    // Is it because other trackers need a canvas instead of an img/video element?
-    if (_oneLoopFinished) {
-      _oneLoopFinished = false;
-      webgazer.params.getLatestVideoFrameTimestamp(performance.now());
-    }
-    await gazePrep();
-  }
-
-  if (!webgazer.params.paused) {
-    if (_now - _last >= 1000 / webgazer.params.framerate) {
-      _last = _now;
-
-      // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
-      latestGazeData = getPrediction();
-      // Count time
-      // var elapsedTime = performance.now() - clockStart;
-
-      latestGazeData = await latestGazeData;
-
-      // [20200623 xk] callback to function passed into setGazeListener(fn)
-      callback(latestGazeData);
-      _oneLoopFinished = true;
-
-      if (latestGazeData) {
-        // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
-        smoothingVals.push(latestGazeData);
-        var x = 0;
-        var y = 0;
-        var len = smoothingVals.length;
-        for (var d in smoothingVals.data) {
-          x += smoothingVals.get(d).x;
-          y += smoothingVals.get(d).y;
-        }
-
-        var pred = util.bound({ x: x / len, y: y / len });
-
-        if (webgazer.params.storingPoints) {
-          // drawCoordinates('blue', pred.x, pred.y); //draws the previous predictions
-          // store the position of the past fifty occuring tracker preditions
-          webgazer.storePoints(pred.x, pred.y, k);
-          ++k;
-          if (k == 50) k = 0;
-        }
-
-        gazeDot.style.opacity = "";
-        gazeDot.style.left = `${pred.x}px`;
-        gazeDot.style.top = `${pred.y}px`;
+      // Paint the latest video frame into the canvas which will be analyzed by WebGazer
+      // [20180729 JT] Why do we need to do this? clmTracker does this itself _already_, which is just duplicating the work.
+      // Is it because other trackers need a canvas instead of an img/video element?
+      if (_oneLoopFinished) {
+        _oneLoopFinished = false;
+        webgazer.params.getLatestVideoFrameTimestamp(performance.now());
       }
+      await gazePrep();
     }
-  } else {
-    if (gazeDot && !gazeDotPopped) gazeDot.style.opacity = "0";
+
+    if (!webgazer.params.paused) {
+      if (_now - _last >= 1000 / webgazer.params.framerate) {
+        _last = _now;
+
+        // Get gaze prediction (ask clm to track; pass the data to the regressor; get back a prediction)
+        latestGazeData = getPrediction();
+        // Count time
+        // var elapsedTime = performance.now() - clockStart;
+
+        latestGazeData = await latestGazeData;
+
+        // [20200623 xk] callback to function passed into setGazeListener(fn)
+        callback(latestGazeData);
+        _oneLoopFinished = true;
+
+        if (latestGazeData) {
+          // [20200608 XK] Smoothing across the most recent 4 predictions, do we need this with Kalman filter?
+          smoothingVals.push(latestGazeData);
+          var x = 0;
+          var y = 0;
+          var len = smoothingVals.length;
+          for (var d in smoothingVals.data) {
+            x += smoothingVals.get(d).x;
+            y += smoothingVals.get(d).y;
+          }
+
+          var pred = util.bound({ x: x / len, y: y / len });
+
+          if (webgazer.params.storingPoints) {
+            // drawCoordinates('blue', pred.x, pred.y); //draws the previous predictions
+            // store the position of the past fifty occuring tracker preditions
+            webgazer.storePoints(pred.x, pred.y, k);
+            ++k;
+            if (k == 50) k = 0;
+          }
+
+          gazeDot.style.opacity = "";
+          gazeDot.style.left = `${pred.x}px`;
+          gazeDot.style.top = `${pred.y}px`;
+        }
+      }
+    } else {
+      if (gazeDot && !gazeDotPopped) gazeDot.style.opacity = "0";
+    }
+
+    lastLoopFrameTime = currentTime;
   }
 
   requestAnimationFrame(loop);
