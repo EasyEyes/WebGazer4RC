@@ -101,6 +101,9 @@ var curTrackerMap = {
   TFFacemesh: function () {
     return new webgazer.tracker.TFFaceMesh();
   },
+  TFFacemesh_unrefined_landmarks: function () {
+    return new webgazer.tracker.TFFaceMesh(false);
+  },
 };
 var regressionMap = {
   ridge: function () {
@@ -1451,7 +1454,7 @@ webgazer.storePoints = function (x, y, k) {
  * @param {String} name - The name of the tracking module to use
  * @return {webgazer} this
  */
-webgazer.setTracker = function (name) {
+webgazer.setTracker = async function (name) {
   if (curTrackerMap[name] === undefined) {
     console.log("Invalid tracker selection");
     console.log("Options are: ");
@@ -1461,6 +1464,7 @@ webgazer.setTracker = function (name) {
     return webgazer;
   }
   curTracker = curTrackerMap[name]();
+  await curTracker.loadModel();
   return webgazer;
 };
 

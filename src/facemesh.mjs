@@ -9,14 +9,14 @@ const isOnline = () => {
  * Constructor of TFFaceMesh object
  * @constructor
  * */
-const TFFaceMesh = function() {
+const TFFaceMesh = function(refineLandmarks = true) {
   this.model = faceLandmarksDetection.createDetector(
     faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
     { 
       runtime: 'tfjs',
       detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
       landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json',
-      refineLandmarks: true
+      refineLandmarks: refineLandmarks
     }
   );
 
@@ -73,6 +73,8 @@ TFFaceMesh.prototype.getEyePatches = async function(video, imageCanvas, width, h
   }
 
   // Load the MediaPipe facemesh model.
+  if(!this.modelLoaded) await this.loadModel();
+  
   const model = this.model;
   // useFullRangeModel(model);
 
