@@ -14,8 +14,10 @@ const TFFaceMesh = function(refineLandmarks = true) {
     faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
     { 
       runtime: 'tfjs',
-      detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
-      landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json',
+      // detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
+      // landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json',
+      detectorModelUrl: './models/detector/model.json',
+      landmarkModelUrl: './models/landmark_attention/model.json',
       refineLandmarks: refineLandmarks
     }
   );
