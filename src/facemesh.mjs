@@ -17,7 +17,7 @@ const TFFaceMesh = function(refineLandmarks = true) {
       // detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
       // landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json',
       detectorModelUrl: './models/detector/model.json',
-      landmarkModelUrl: './models/landmark_attention/model.json',
+      landmarkModelUrl: refineLandmarks? './models/landmark_attention/model.json' : './models/landmark/model.json',
       refineLandmarks: refineLandmarks
     }
   );
