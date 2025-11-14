@@ -14,6 +14,8 @@ import Reg from "./ridgeReg.mjs";
 import ridgeRegWeighted from "./ridgeWeightedReg.mjs";
 import ridgeRegThreaded from "./ridgeRegThreaded.mjs";
 import util from "./util.mjs";
+import { VideoLiveMonitor } from './videoLiveMonitor.mjs';
+import Swal from 'sweetalert2';
 
 function sleep(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
@@ -127,6 +129,18 @@ var defaults = {
   data: [],
   settings: {},
 };
+
+const  streamHasVideo = (stream) => {
+  return !!stream && stream.getVideoTracks().length > 0;
+}
+
+const hasLiveVideo = (stream) => {
+  if (!stream) return false;
+  const t = stream.getVideoTracks()[0];
+  return !!t && t.readyState === "live" && !t.muted;
+}
+
+let liveMonitor = null;
 
 //PRIVATE FUNCTIONS
 
@@ -1286,70 +1300,163 @@ webgazer.applyKalmanFilter = function (val) {
  * Note: The constraints set here are applied to the video track only. They also _replace_ any constraints, so be sure to set everything you need.
  * Warning: Setting a large video resolution will decrease performance, and may require
  */
-webgazer.setCameraConstraints = async function (constraints) {
-  // var videoTrack, videoSettings;
+// webgazer.setCameraConstraints = async function (constraints) {
+//   // var videoTrack, videoSettings;
   
-  // Enforce landscape orientation in constraints
+//   // Enforce landscape orientation in constraints
+//   const landscapeConstraints = {
+//     ...constraints,
+//     video: {
+//       ...constraints.video,
+//       // Ensure landscape aspect ratio
+//       aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+//       // Set minimum width to be greater than minimum height
+//       width: { min: 640, ideal: 1920, max: 7680 },
+//       height: { min: 360, ideal: 1080, max: 4320 }
+//     }
+//   };
+  
+//   webgazer.params.camConstraints = landscapeConstraints;
+
+//   // If the camera stream is already up...
+//   if (videoStream) {
+//     webgazer.pause();
+//     // videoTrack = videoStream.getVideoTracks()[0];
+//     try {
+//       // await videoTrack.applyConstraints( webgazer.params.camConstraints );
+//       videoStream.getVideoTracks().forEach((track) => {
+//         track.stop();
+//       });
+//       const stream = await navigator.mediaDevices.getUserMedia(
+//         webgazer.params.camConstraints
+//       );
+
+
+//       const hasLiveVideo = async (stream) => {
+//         if (!stream) return false;
+//         const track = stream.getVideoTracks()[0];
+//         return !!track && track.readyState === "live" && !track.muted;
+//       }
+
+//       if (hasLiveVideo(stream)) {
+//         console.log("Live video feed is active");
+//       } else {
+//         console.warn("Video track is missing or inactive");
+//       }
+
+//       setTimeout(() => {
+//         const videoTrack = stream.getVideoTracks()[0];
+//         const videoSettings = videoTrack.getSettings();
+        
+//         // Enforce landscape orientation if video is in portrait
+//         if (videoSettings.width < videoSettings.height) {
+//           try {
+//             videoTrack.applyConstraints({
+//               width: { min: 640, ideal: 1920, max: 7680 },
+//               height: { min: 360, ideal: 1080, max: 4320 },
+//               aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+//             });
+//           } catch (constraintError) {
+//             console.warn('Could not enforce landscape orientation:', constraintError);
+//           }
+//         }
+        
+//         videoStream = stream;
+//         videoElement.srcObject = stream;
+//         setInternalVideoBufferSizes(videoSettings.width, videoSettings.height);
+//         webgazer.videoParamsToReport = { height: videoSettings.height, width: videoSettings.width };
+//       }, 1500);
+//     } catch (err) {
+//       console.log(err);
+//       return;
+//     }
+//     // Reset and recompute sizes of the video viewer.
+//     // This is only to adjust the feedback box, say, if the aspect ratio of the video has changed.
+//     // webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight )
+//     // webgazer.getTracker().reset();
+//     await webgazer.resume();
+//   }
+// };
+webgazer.setCameraConstraints = async function (constraints) {
   const landscapeConstraints = {
     ...constraints,
     video: {
       ...constraints.video,
-      // Ensure landscape aspect ratio
       aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-      // Set minimum width to be greater than minimum height
-      width: { min: 640, ideal: 1920, max: 7680 },
+      width:  { min: 640, ideal: 1920, max: 7680 },
       height: { min: 360, ideal: 1080, max: 4320 }
     }
   };
-  
   webgazer.params.camConstraints = landscapeConstraints;
 
-  // If the camera stream is already up...
   if (videoStream) {
     webgazer.pause();
-    // videoTrack = videoStream.getVideoTracks()[0];
     try {
-      // await videoTrack.applyConstraints( webgazer.params.camConstraints );
-      videoStream.getVideoTracks().forEach((track) => {
-        track.stop();
-      });
-      const stream = await navigator.mediaDevices.getUserMedia(
-        webgazer.params.camConstraints
-      );
-      setTimeout(() => {
+      // stop old
+      videoStream.getVideoTracks().forEach(t => t.stop());
+
+      // new stream
+      const stream = await navigator.mediaDevices.getUserMedia(webgazer.params.camConstraints);
+
+      if (streamHasVideo(stream)) {
+        console.log("Video tracks:", stream.getVideoTracks().length);
+      }
+      if (hasLiveVideo(stream)) {
+        console.log("✅ Live video feed is active");
+      } else {
+        console.warn("⚠️ Video track missing or inactive");
+      }
+
+      // (optional) settle a moment, then enforce landscape if needed
+      setTimeout(async () => {
         const videoTrack = stream.getVideoTracks()[0];
         const videoSettings = videoTrack.getSettings();
-        
-        // Enforce landscape orientation if video is in portrait
-        if (videoSettings.width < videoSettings.height) {
+
+        if (videoSettings.width && videoSettings.height && videoSettings.width < videoSettings.height) {
           try {
-            videoTrack.applyConstraints({
-              width: { min: 640, ideal: 1920, max: 7680 },
+            await videoTrack.applyConstraints({
+              width:  { min: 640, ideal: 1920, max: 7680 },
               height: { min: 360, ideal: 1080, max: 4320 },
               aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
             });
-          } catch (constraintError) {
-            console.warn('Could not enforce landscape orientation:', constraintError);
+          } catch (e) {
+            console.warn('Could not enforce landscape orientation:', e);
           }
         }
-        
+
+        // attach
         videoStream = stream;
         videoElement.srcObject = stream;
-        setInternalVideoBufferSizes(videoSettings.width, videoSettings.height);
-        webgazer.videoParamsToReport = { height: videoSettings.height, width: videoSettings.width };
-      }, 1500);
+
+        const w = videoTrack.getSettings().width || 640;
+        const h = videoTrack.getSettings().height || 480;
+        setInternalVideoBufferSizes(w, h);
+        webgazer.videoParamsToReport = { height: h, width: w };
+
+        // 🔔 Start/replace the live monitor
+        if (liveMonitor) liveMonitor.stop();
+        liveMonitor = new VideoLiveMonitor(stream, videoElement, 1000);
+        liveMonitor.onChange((snap) => {
+          // Fires EVERY time status changes: "live" | "muted" | "inactive" | "ended"
+          console.log("[camera status]", snap.status, snap);
+
+          if (snap.status === "ended" || snap.status === "inactive") {
+            // Show your popup / call your reconnect logic
+            showCameraReconnectionPopup("Camera disconnected");
+          }
+          // You can also react to "muted" (often transient on tab switches)
+        });
+        liveMonitor.start();
+
+      }, 500);
+
     } catch (err) {
-      console.log(err);
+      console.error(err);
       return;
     }
-    // Reset and recompute sizes of the video viewer.
-    // This is only to adjust the feedback box, say, if the aspect ratio of the video has changed.
-    // webgazer.setVideoViewerSize( webgazer.params.videoViewerWidth, webgazer.params.videoViewerHeight )
-    // webgazer.getTracker().reset();
     await webgazer.resume();
   }
 };
-
 /**
  * Does what it says on the tin.
  * @param {*} width
@@ -1368,6 +1475,103 @@ function setInternalVideoBufferSizes(width, height) {
     faceOverlay.height = height;
   }
 }
+
+/**
+ * Callback function for camera reconnection events.
+ * Can be set by parent application to handle camera disconnection.
+ * @type {Function|null}
+ */
+webgazer.onCameraDisconnected = null;
+
+/**
+ * Shows a camera reconnection popup or notification when camera is disconnected.
+ * This function can be overridden by the parent application to provide custom UI.
+ * @param {string} message - The message to display
+ */
+async function showCameraReconnectionPopup(message) {
+  console.warn("🚨 Camera Disconnected:", message);
+  
+  // If a custom callback is registered, use it
+  if (typeof webgazer.onCameraDisconnected === 'function') {
+    webgazer.onCameraDisconnected(message);
+    return;
+  }
+  
+  // Default behavior: show SweetAlert2 popup with reconnect option
+  const result = await Swal.fire({
+    icon: 'error',
+    title: 'Camera Disconnected',
+    html: `
+      <p style="margin: 1rem 0; line-height: 1.6;">
+        ${message}
+      </p>
+      <p style="margin: 1rem 0; line-height: 1.6;">
+        Your camera has been disconnected. Please check your camera connection and try reconnecting.
+      </p>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Reconnect Camera',
+    cancelButtonText: 'Cancel',
+    allowEscapeKey: false,
+    allowOutsideClick: false,
+    customClass: {
+      popup: 'camera-reconnection-popup',
+      confirmButton: 'swal2-confirm-reconnect',
+      cancelButton: 'swal2-cancel'
+    }
+  });
+
+  if (result.isConfirmed) {
+    // User clicked "Reconnect Camera"
+    try {
+      console.log('Attempting to reconnect camera...');
+      
+      // Try to reinitialize the camera with existing constraints
+      if (webgazer.params.camConstraints) {
+        await webgazer.setCameraConstraints(webgazer.params.camConstraints);
+        
+        // Show success message
+        await Swal.fire({
+          icon: 'success',
+          title: 'Camera Reconnected',
+          text: 'Your camera has been successfully reconnected.',
+          timer: 2000,
+          showConfirmButton: false
+        });
+      } else {
+        throw new Error('No camera constraints available');
+      }
+    } catch (error) {
+      console.error('Failed to reconnect camera:', error);
+      
+      // Show error and ask if they want to try again
+      const retryResult = await Swal.fire({
+        icon: 'error',
+        title: 'Reconnection Failed',
+        text: 'Failed to reconnect the camera. Would you like to try again?',
+        showCancelButton: true,
+        confirmButtonText: 'Try Again',
+        cancelButtonText: 'Cancel'
+      });
+      
+      if (retryResult.isConfirmed) {
+        // Recursively try again
+        await showCameraReconnectionPopup(message);
+      }
+    }
+  }
+}
+
+/**
+ * Set a custom callback for camera disconnection events.
+ * This allows parent applications to show custom UI instead of the default alert.
+ * @param {Function} callback - Function to call when camera is disconnected
+ * @return {webgazer} this
+ */
+webgazer.setOnCameraDisconnected = function(callback) {
+  webgazer.onCameraDisconnected = callback;
+  return webgazer;
+};
 
 /**
  *  Set a static video file to be used instead of webcam video
