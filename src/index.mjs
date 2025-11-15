@@ -1434,19 +1434,19 @@ webgazer.setCameraConstraints = async function (constraints) {
         webgazer.videoParamsToReport = { height: h, width: w };
 
         // 🔔 Start/replace the live monitor
-        if (liveMonitor) liveMonitor.stop();
-        liveMonitor = new VideoLiveMonitor(stream, videoElement, 1000);
-        liveMonitor.onChange((snap) => {
-          // Fires EVERY time status changes: "live" | "muted" | "inactive" | "ended"
-          console.log("[camera status]", snap.status, snap);
+        // if (liveMonitor) liveMonitor.stop();
+        // liveMonitor = new VideoLiveMonitor(stream, videoElement, 1000);
+        // liveMonitor.onChange((snap) => {
+        //   // Fires EVERY time status changes: "live" | "muted" | "inactive" | "ended"
+        //   console.log("[camera status]", snap.status, snap);
 
-          if (snap.status === "ended" || snap.status === "inactive") {
-            // Show your popup / call your reconnect logic
-            showCameraReconnectionPopup("Camera disconnected");
-          }
-          // You can also react to "muted" (often transient on tab switches)
-        });
-        liveMonitor.start();
+        //   if (snap.status === "ended" || snap.status === "inactive") {
+        //     // Show your popup / call your reconnect logic
+        //     // showCameraReconnectionPopup("Camera disconnected");
+        //   }
+        //   // You can also react to "muted" (often transient on tab switches)
+        // });
+        // liveMonitor.start();
 
       }, 500);
 
