@@ -34,7 +34,7 @@ webgazer.reg.RidgeWeightedReg = ridgeRegWeighted.RidgeWeightedReg;
 webgazer.reg.RidgeRegThreaded = ridgeRegThreaded.RidgeRegThreaded;
 webgazer.util = util;
 webgazer.params = params;
-webgazer.videoParamsToReport = {height: 0, width: 0};
+webgazer.videoParamsToReport = {height: 0, width: 0, maxHeight: 0, maxWidth: 0};
 
 //PRIVATE VARIABLES
 
@@ -965,34 +965,40 @@ webgazer._begin = function (videoOnly, onVideoFail) {
           // })
 
           try {
-            stream = await navigator.mediaDevices.getUserMedia(
-              _setUpConstraints(webgazer.params.camConstraints)
-            );
-            const videoTrack = stream.getVideoTracks()[0];
-            const { height, width } = videoTrack.getSettings();
-            
-            // Enforce landscape orientation if video is in portrait
-            if (width < height) {
-              try {
-                // Try to apply landscape constraints
-                await videoTrack.applyConstraints({
-                  width: { min: 640, ideal: 1920, max: 7680 },
-                  height: { min: 360, ideal: 1080, max: 4320 },
-                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
-                });
-                // Get updated settings
-                const newSettings = videoTrack.getSettings();
-                webgazer.videoParamsToReport = { 
-                  height: newSettings.height, 
-                  width: newSettings.width 
-                };
-              } catch (constraintError) {
-                console.warn('Could not enforce landscape orientation:', constraintError);
-                webgazer.videoParamsToReport = { height, width };
+            // First get stream with max resolution to test camera capability
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 7680 },
+                height: { ideal: 4320 },
+                facingMode: "user"
               }
-            } else {
-              webgazer.videoParamsToReport = { height, width };
-            }
+            });
+            
+            const videoTrack = stream.getVideoTracks()[0];
+            
+            // Capture max resolution the camera can provide
+            const maxSettings = videoTrack.getSettings();
+            const maxWidth = maxSettings.width;
+            const maxHeight = maxSettings.height;
+            
+            // Now apply our actual working constraints (landscape, 1920x1080 ideal)
+            await videoTrack.applyConstraints({
+              width: { min: 640, ideal: 1920, max: 7680 },
+              height: { min: 360, ideal: 1080, max: 4320 },
+              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+            });
+            
+            // Get final working resolution
+            const finalSettings = videoTrack.getSettings();
+            const height = finalSettings.height;
+            const width = finalSettings.width;
+            
+            webgazer.videoParamsToReport = { 
+              height, 
+              width,
+              maxHeight,
+              maxWidth
+            };
           } catch (error) {
             onVideoFail(videoInputs);
             throw error;
@@ -1395,8 +1401,15 @@ webgazer.setCameraConstraints = async function (constraints) {
       // stop old
       videoStream.getVideoTracks().forEach(t => t.stop());
 
-      // new stream
-      const stream = await navigator.mediaDevices.getUserMedia(webgazer.params.camConstraints);
+      // new stream - request max resolution first to test capability
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: webgazer.params.camConstraints.video.deviceId,
+          width: { ideal: 7680 },
+          height: { ideal: 4320 },
+          facingMode: "user"
+        }
+      });
 
       if (streamHasVideo(stream)) {
         console.log("Video tracks:", stream.getVideoTracks().length);
@@ -1407,22 +1420,21 @@ webgazer.setCameraConstraints = async function (constraints) {
         console.warn("⚠️ Video track missing or inactive");
       }
 
-      // (optional) settle a moment, then enforce landscape if needed
+      // (optional) settle a moment, then capture max and apply constraints
       setTimeout(async () => {
         const videoTrack = stream.getVideoTracks()[0];
-        const videoSettings = videoTrack.getSettings();
+        
+        // Capture initial max resolution the stream provides
+        const maxSettings = videoTrack.getSettings();
+        const maxWidth = maxSettings.width;
+        const maxHeight = maxSettings.height;
 
-        if (videoSettings.width && videoSettings.height && videoSettings.width < videoSettings.height) {
-          try {
-            await videoTrack.applyConstraints({
-              width:  { min: 640, ideal: 1920, max: 7680 },
-              height: { min: 360, ideal: 1080, max: 4320 },
-              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
-            });
-          } catch (e) {
-            console.warn('Could not enforce landscape orientation:', e);
-          }
-        }
+        // Apply landscape constraints
+        await videoTrack.applyConstraints({
+          width:  { min: 640, ideal: 1920, max: 7680 },
+          height: { min: 360, ideal: 1080, max: 4320 },
+          aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+        });
 
         // attach
         videoStream = stream;
@@ -1431,7 +1443,13 @@ webgazer.setCameraConstraints = async function (constraints) {
         const w = videoTrack.getSettings().width || 640;
         const h = videoTrack.getSettings().height || 480;
         setInternalVideoBufferSizes(w, h);
-        webgazer.videoParamsToReport = { height: h, width: w };
+        
+        webgazer.videoParamsToReport = { 
+          height: h, 
+          width: w,
+          maxHeight,
+          maxWidth
+        };
 
         // 🔔 Start/replace the live monitor
         // if (liveMonitor) liveMonitor.stop();
