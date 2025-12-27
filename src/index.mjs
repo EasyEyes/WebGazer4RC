@@ -1383,6 +1383,20 @@ webgazer.applyKalmanFilter = function (val) {
 //     await webgazer.resume();
 //   }
 // };
+
+webgazer.getCameraResolutionXY = function () {
+  try {
+    const videoTrack = videoStream.getVideoTracks()[0];
+    const videoSettings = videoTrack.getSettings();
+    return {
+      width: videoSettings.width,
+      height: videoSettings.height,
+    }
+  } catch (error) {
+    console.error("Error getting camera resolution:", error);
+    return { width: 0, height: 0 };
+  }
+}
 webgazer.setCameraConstraints = async function (constraints) {
   const landscapeConstraints = {
     ...constraints,
