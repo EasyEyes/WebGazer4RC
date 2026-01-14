@@ -220,9 +220,11 @@
         tempCanvas.height = resizeHeight;
 
         // save the canvas into temp canvas
-        tempCanvas.getContext('2d').drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, resizeWidth, resizeHeight);
+        // Use willReadFrequently for better performance with getImageData
+        var tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+        tempCtx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, resizeWidth, resizeHeight);
 
-        return tempCanvas.getContext('2d').getImageData(0, 0, resizeWidth, resizeHeight);
+        return tempCtx.getImageData(0, 0, resizeWidth, resizeHeight);
     };
 
     /**

@@ -302,7 +302,7 @@ function paintCurrentFrame(canvas, width, height) {
     canvas.height = height;
   }
 
-  var ctx = canvas.getContext("2d");
+  var ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
 }
 
