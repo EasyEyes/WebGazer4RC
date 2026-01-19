@@ -15,11 +15,12 @@ const params = {
   showFaceOverlay: true,
   showFaceFeedbackBox: true,
   showGazeDot: true,
-  //setting high width and height to get maximum resolution from the webcam with landscape enforcement
+  // Force best resolution with min constraints (browsers must respect min or fail)
+  // Uses min: 1920x1080, falls back to 1280x720, then ideal-only for older cameras
   camConstraints: { 
     video: { 
-      width: { min: 640, ideal: 1920, max: 7680 }, 
-      height: { min: 360, ideal: 1080, max: 4320 }, 
+      width: { min: 1920, ideal: 7680 }, 
+      height: { min: 1080, ideal: 4320 }, 
       aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
       facingMode: "user" 
     } 

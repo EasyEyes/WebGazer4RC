@@ -644,7 +644,8 @@ async function init(initMode = "all", stream) {
     // create a video element container to enable customizable placement on the page
     videoContainerElement = document.createElement("div");
     videoContainerElement.id = webgazer.params.videoContainerId;
-    videoContainerElement.style.display = "block";
+    // Start hidden - will be shown when needed (prevents flash before popup)
+    videoContainerElement.style.display = "none";
     // videoContainerElement.style.visibility = webgazer.params.showVideo ? 'visible' : 'hidden';
     videoContainerElement.style.opacity = webgazer.params.showVideo ? 0.8 : 0;
     // videoContainerElement.style.position = 'fixed';
@@ -965,39 +966,55 @@ webgazer._begin = function (videoOnly, onVideoFail) {
           // })
 
           try {
-            // First get stream with max resolution to test camera capability
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: {
-                width: { ideal: 7680 },
-                height: { ideal: 4320 },
-                facingMode: "user"
+            // Force best resolution with min constraints (browsers must respect min or fail)
+            // Try min: 1920x1080 first, fallback to 1280x720, then ideal-only
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  width: { min: 1920, ideal: 7680 },
+                  height: { min: 1080, ideal: 4320 },
+                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                  facingMode: "user"
+                }
+              });
+              console.log("✅ Got stream with min 1920x1080");
+            } catch (fullHDError) {
+              console.warn("Camera doesn't support 1920x1080 min, trying 1280x720");
+              try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                  video: {
+                    width: { min: 1280, ideal: 7680 },
+                    height: { min: 720, ideal: 4320 },
+                    aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                    facingMode: "user"
+                  }
+                });
+                console.log("✅ Got stream with min 1280x720");
+              } catch (hdError) {
+                console.warn("Camera doesn't support 1280x720 min, using ideal-only");
+                stream = await navigator.mediaDevices.getUserMedia({
+                  video: {
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                    aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                    facingMode: "user"
+                  }
+                });
               }
-            });
+            }
             
             const videoTrack = stream.getVideoTracks()[0];
+            const settings = videoTrack.getSettings();
+            const width = settings.width;
+            const height = settings.height;
             
-            // Capture max resolution the camera can provide
-            const maxSettings = videoTrack.getSettings();
-            const maxWidth = maxSettings.width;
-            const maxHeight = maxSettings.height;
-            
-            // Now apply our actual working constraints (landscape, 1920x1080 ideal)
-            await videoTrack.applyConstraints({
-              width: { min: 640, ideal: 1920, max: 7680 },
-              height: { min: 360, ideal: 1080, max: 4320 },
-              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
-            });
-            
-            // Get final working resolution
-            const finalSettings = videoTrack.getSettings();
-            const height = finalSettings.height;
-            const width = finalSettings.width;
+            console.log(`Camera resolution: ${width}x${height}`);
             
             webgazer.videoParamsToReport = { 
               height, 
               width,
-              maxHeight,
-              maxWidth
+              maxHeight: height,
+              maxWidth: width
             };
           } catch (error) {
             onVideoFail(videoInputs);
@@ -1397,90 +1414,95 @@ webgazer.getCameraResolutionXY = function () {
     return { width: 0, height: 0 };
   }
 }
-webgazer.setCameraConstraints = async function (constraints) {
-  const landscapeConstraints = {
-    ...constraints,
-    video: {
-      ...constraints.video,
-      aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-      width:  { min: 640, ideal: 1920, max: 7680 },
-      height: { min: 360, ideal: 1080, max: 4320 }
-    }
-  };
-  webgazer.params.camConstraints = landscapeConstraints;
-
+webgazer.setCameraConstraints = async function (constraints, knownResolution = null) {
+  const deviceId = constraints.video?.deviceId;
+  
   if (videoStream) {
     webgazer.pause();
     try {
-      // stop old
+      // Stop old stream
       videoStream.getVideoTracks().forEach(t => t.stop());
 
-      // new stream - request max resolution first to test capability
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: webgazer.params.camConstraints.video.deviceId,
-          width: { ideal: 7680 },
-          height: { ideal: 4320 },
-          facingMode: "user"
-        }
-      });
-
-      if (streamHasVideo(stream)) {
-        console.log("Video tracks:", stream.getVideoTracks().length);
-      }
-      if (hasLiveVideo(stream)) {
-        console.log("✅ Live video feed is active");
-      } else {
-        console.warn("⚠️ Video track missing or inactive");
-      }
-
-      // (optional) settle a moment, then capture max and apply constraints
-      setTimeout(async () => {
-        const videoTrack = stream.getVideoTracks()[0];
-        
-        // Capture initial max resolution the stream provides
-        const maxSettings = videoTrack.getSettings();
-        const maxWidth = maxSettings.width;
-        const maxHeight = maxSettings.height;
-
-        // Apply landscape constraints
-        await videoTrack.applyConstraints({
-          width:  { min: 640, ideal: 1920, max: 7680 },
-          height: { min: 360, ideal: 1080, max: 4320 },
-          aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 }
+      let stream;
+      
+      // If we already know the resolution (from preview), use it directly
+      if (knownResolution && knownResolution.width >= 1920) {
+        console.log(`Using known resolution: ${knownResolution.width}x${knownResolution.height}`);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: deviceId,
+            width: { min: 1920, ideal: knownResolution.width },
+            height: { min: 1080, ideal: knownResolution.height },
+            aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+            facingMode: "user"
+          }
         });
+      } else if (knownResolution && knownResolution.width >= 1280) {
+        console.log(`Using known resolution (720p+): ${knownResolution.width}x${knownResolution.height}`);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: deviceId,
+            width: { min: 1280, ideal: knownResolution.width },
+            height: { min: 720, ideal: knownResolution.height },
+            aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+            facingMode: "user"
+          }
+        });
+      } else {
+        // No known resolution - try progressive fallback
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: deviceId,
+              width: { min: 1920, ideal: 7680 },
+              height: { min: 1080, ideal: 4320 },
+              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+              facingMode: "user"
+            }
+          });
+        } catch (fullHDError) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: deviceId,
+                width: { min: 1280, ideal: 7680 },
+                height: { min: 720, ideal: 4320 },
+                aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                facingMode: "user"
+              }
+            });
+          } catch (hdError) {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: deviceId,
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                facingMode: "user"
+              }
+            });
+          }
+        }
+      }
 
-        // attach
-        videoStream = stream;
-        videoElement.srcObject = stream;
+      const videoTrack = stream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      const w = settings.width || 640;
+      const h = settings.height || 480;
+      
+      console.log(`setCameraConstraints: ${w}x${h}`);
 
-        const w = videoTrack.getSettings().width || 640;
-        const h = videoTrack.getSettings().height || 480;
-        setInternalVideoBufferSizes(w, h);
-        
-        webgazer.videoParamsToReport = { 
-          height: h, 
-          width: w,
-          maxHeight,
-          maxWidth
-        };
-
-        // 🔔 Start/replace the live monitor
-        // if (liveMonitor) liveMonitor.stop();
-        // liveMonitor = new VideoLiveMonitor(stream, videoElement, 1000);
-        // liveMonitor.onChange((snap) => {
-        //   // Fires EVERY time status changes: "live" | "muted" | "inactive" | "ended"
-        //   console.log("[camera status]", snap.status, snap);
-
-        //   if (snap.status === "ended" || snap.status === "inactive") {
-        //     // Show your popup / call your reconnect logic
-        //     // showCameraReconnectionPopup("Camera disconnected");
-        //   }
-        //   // You can also react to "muted" (often transient on tab switches)
-        // });
-        // liveMonitor.start();
-
-      }, 500);
+      // Attach stream
+      videoStream = stream;
+      videoElement.srcObject = stream;
+      setInternalVideoBufferSizes(w, h);
+      
+      webgazer.videoParamsToReport = { 
+        height: h, 
+        width: w,
+        maxHeight: h,
+        maxWidth: w
+      };
 
     } catch (err) {
       console.error(err);
