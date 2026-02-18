@@ -34,7 +34,7 @@ webgazer.reg.RidgeWeightedReg = ridgeRegWeighted.RidgeWeightedReg;
 webgazer.reg.RidgeRegThreaded = ridgeRegThreaded.RidgeRegThreaded;
 webgazer.util = util;
 webgazer.params = params;
-webgazer.videoParamsToReport = {height: 0, width: 0, maxHeight: 0, maxWidth: 0};
+webgazer.videoParamsToReport = {height: 0, width: 0, maxHeight: 0, maxWidth: 0, frameRate: 0, maxFrameRate: 0};
 
 //PRIVATE VARIABLES
 
@@ -291,11 +291,18 @@ async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
   const elapsed = performance.now() - startTime;
   console.log(`[findBestCameraMode] Final: ${finalSettings.width}x${finalSettings.height} @ ${finalSettings.frameRate}Hz (probing took ${elapsed.toFixed(0)}ms)`);
 
+  const capMaxWidth = capabilities?.width?.max || finalSettings.width;
+  const capMaxHeight = capabilities?.height?.max || finalSettings.height;
+  const capMaxFrameRate = capabilities?.frameRate?.max || finalSettings.frameRate;
+
   return {
     stream: tempStream,
     width: finalSettings.width,
     height: finalSettings.height,
-    frameRate: finalSettings.frameRate
+    frameRate: finalSettings.frameRate,
+    capMaxWidth,
+    capMaxHeight,
+    capMaxFrameRate
   };
 }
 
@@ -1198,10 +1205,12 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               webgazer.videoParamsToReport = {
                 height: result.height,
                 width: result.width,
-                maxHeight: result.height,
-                maxWidth: result.width
+                maxHeight: result.capMaxHeight,
+                maxWidth: result.capMaxWidth,
+                frameRate: result.frameRate,
+                maxFrameRate: result.capMaxFrameRate
               };
-              console.log(`Camera resolution (probed): ${result.width}x${result.height} @ ${result.frameRate}Hz`);
+              console.log(`Camera resolution (probed): ${result.width}x${result.height} @ ${result.frameRate}Hz, capability max: ${result.capMaxWidth}x${result.capMaxHeight}`);
             } else {
               // Original progressive fallback (no desired resolution specified)
               // Try min: 1920x1080 first, fallback to 1280x720, then ideal-only
@@ -1245,13 +1254,20 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               const width = settings.width;
               const height = settings.height;
 
-              console.log(`Camera resolution: ${width}x${height}`);
+              const cap = typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : null;
+              const capMaxWidth = cap?.width?.max || width;
+              const capMaxHeight = cap?.height?.max || height;
+              const actualFrameRate = settings.frameRate || 0;
+              const capMaxFrameRate = cap?.frameRate?.max || actualFrameRate;
+              console.log(`Camera resolution: ${width}x${height} @ ${actualFrameRate}Hz, capability max: ${capMaxWidth}x${capMaxHeight} @ ${capMaxFrameRate}Hz`);
 
               webgazer.videoParamsToReport = { 
                 height, 
                 width,
-                maxHeight: height,
-                maxWidth: width
+                maxHeight: capMaxHeight,
+                maxWidth: capMaxWidth,
+                frameRate: actualFrameRate,
+                maxFrameRate: capMaxFrameRate
               };
             }
           } catch (error) {
@@ -1674,7 +1690,7 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
 
         const w = result.width;
         const h = result.height;
-        console.log(`setCameraConstraints (probed): ${w}x${h} @ ${result.frameRate}Hz`);
+        console.log(`setCameraConstraints (probed): ${w}x${h} @ ${result.frameRate}Hz, capability max: ${result.capMaxWidth}x${result.capMaxHeight}`);
 
         videoStream = stream;
         videoElement.srcObject = stream;
@@ -1682,7 +1698,9 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
 
         webgazer.videoParamsToReport = {
           height: h, width: w,
-          maxHeight: h, maxWidth: w
+          maxHeight: result.capMaxHeight, maxWidth: result.capMaxWidth,
+          frameRate: result.frameRate,
+          maxFrameRate: result.capMaxFrameRate
         };
       } else {
         // Original behavior: use known resolution or progressive fallback
@@ -1749,7 +1767,12 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
         const w = settings.width || 640;
         const h = settings.height || 480;
 
-        console.log(`setCameraConstraints: ${w}x${h}`);
+        const cap = typeof videoTrack.getCapabilities === 'function' ? videoTrack.getCapabilities() : null;
+        const capMaxW = cap?.width?.max || w;
+        const capMaxH = cap?.height?.max || h;
+        const actualFR = settings.frameRate || 0;
+        const capMaxFR = cap?.frameRate?.max || actualFR;
+        console.log(`setCameraConstraints: ${w}x${h} @ ${actualFR}Hz, capability max: ${capMaxW}x${capMaxH} @ ${capMaxFR}Hz`);
 
         videoStream = stream;
         videoElement.srcObject = stream;
@@ -1757,7 +1780,9 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
 
         webgazer.videoParamsToReport = { 
           height: h, width: w,
-          maxHeight: h, maxWidth: w
+          maxHeight: capMaxH, maxWidth: capMaxW,
+          frameRate: actualFR,
+          maxFrameRate: capMaxFR
         };
       }
 
