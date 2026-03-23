@@ -2,6 +2,10 @@
 // emits a snapshot whenever the stream's "liveness" changes.
 // status: "live" | "muted" | "inactive" | "ended"
 
+const GRACE_PERIOD_MS = 5000;
+const BAD_STATUS_THRESHOLD = 3;
+const LOG_PREFIX = '[CameraMonitor]';
+
 export class VideoLiveMonitor {
     constructor(stream, videoEl, pollMs = 1000) {
       this.stream = stream;
@@ -12,21 +16,32 @@ export class VideoLiveMonitor {
       this._tickId = null;
       this._listeners = new Set();
       this._lastStatus = null;
+      this._graceUntil = 0;
+      this._consecutiveBadCount = 0;
+      this._tickCount = 0;
   
       // bind handlers
-      this._onEnded = this._emitIfChanged.bind(this);
-      this._onMuteUnmute = this._emitIfChanged.bind(this);
-      this._onDeviceChange = this._emitIfChanged.bind(this);
+      this._onEnded = () => { console.warn(LOG_PREFIX, 'Track "ended" event fired'); this._emitIfChanged(); };
+      this._onMuteUnmute = () => { console.log(LOG_PREFIX, 'Track mute/unmute event fired, muted:', this.track?.muted); this._emitIfChanged(); };
+      this._onDeviceChange = () => { console.log(LOG_PREFIX, 'devicechange event fired'); this._emitIfChanged(); };
+
+      console.log(LOG_PREFIX, 'Constructed. Track:', this.track?.readyState, 'Stream active:', stream?.active);
     }
   
     onChange(fn) {
       this._listeners.add(fn);
-      fn(this._snapshot()); // fire immediately with current state
+      const snap = this._snapshot();
+      console.log(LOG_PREFIX, 'onChange registered, initial snapshot:', snap.status, snap);
+      fn(snap);
     }
     offChange(fn) { this._listeners.delete(fn); }
   
     start() {
-      if (!this.track) return;
+      if (!this.track) {
+        console.warn(LOG_PREFIX, 'start() called but no track available');
+        return;
+      }
+      console.log(LOG_PREFIX, 'start() — attaching listeners, pollMs:', this.pollMs, 'graceUntil:', this._graceUntil > 0 ? `${Math.round((this._graceUntil - Date.now()) / 1000)}s remaining` : 'none');
   
       this.track.addEventListener("ended", this._onEnded, { once: false });
       this.track.addEventListener("mute", this._onMuteUnmute, { once: false });
@@ -36,15 +51,44 @@ export class VideoLiveMonitor {
         navigator.mediaDevices.addEventListener("devicechange", this._onDeviceChange);
       }
   
+      this._tickCount = 0;
       const tick = () => {
+        this._tickCount++;
         this._emitIfChanged();
         this._tickId = setTimeout(tick, this.pollMs);
       };
       this._tickId = setTimeout(tick, this.pollMs);
     }
   
-    stop() {
+    pause() {
+      console.log(LOG_PREFIX, 'pause() — stopping polling and detaching listeners');
       if (this._tickId) { clearTimeout(this._tickId); this._tickId = null; }
+      this._detachTrackListeners();
+    }
+
+    stop() {
+      console.log(LOG_PREFIX, 'stop() — full stop, clearing listeners');
+      this.pause();
+      this._listeners.clear();
+    }
+
+    updateStream(newStream, videoEl) {
+      console.log(LOG_PREFIX, 'updateStream() — new stream active:', newStream?.active, 'new track readyState:', newStream?.getVideoTracks()[0]?.readyState);
+      if (this._tickId) { clearTimeout(this._tickId); this._tickId = null; }
+      this._detachTrackListeners();
+
+      this.stream = newStream;
+      if (videoEl) this.video = videoEl;
+      this.track = newStream && newStream.getVideoTracks()[0] || null;
+      this._lastStatus = null;
+      this._consecutiveBadCount = 0;
+      this._graceUntil = Date.now() + GRACE_PERIOD_MS;
+
+      console.log(LOG_PREFIX, `updateStream() — grace period set for ${GRACE_PERIOD_MS}ms, starting monitor`);
+      this.start();
+    }
+
+    _detachTrackListeners() {
       if (this.track) {
         this.track.removeEventListener("ended", this._onEnded);
         this.track.removeEventListener("mute", this._onMuteUnmute);
@@ -53,7 +97,6 @@ export class VideoLiveMonitor {
       if (navigator.mediaDevices && navigator.mediaDevices.removeEventListener) {
         navigator.mediaDevices.removeEventListener("devicechange", this._onDeviceChange);
       }
-      this._listeners.clear();
     }
   
     _snapshot() {
@@ -73,13 +116,35 @@ export class VideoLiveMonitor {
         status, trackReadyState: trackReady, muted, streamActive, videoReadyState: vrs
       };
     }
-  
+
     _emitIfChanged() {
+      const now = Date.now();
+      if (now < this._graceUntil) {
+        if (this._tickCount <= 2) {
+          console.log(LOG_PREFIX, `_emitIfChanged() — in grace period (${Math.round((this._graceUntil - now) / 1000)}s left), skipping`);
+        }
+        return;
+      }
+
       const snap = this._snapshot();
+      const isBad = snap.status === 'ended' || snap.status === 'inactive';
+
+      if (isBad) {
+        this._consecutiveBadCount++;
+        console.warn(LOG_PREFIX, `_emitIfChanged() — BAD status "${snap.status}", consecutiveBadCount: ${this._consecutiveBadCount}/${BAD_STATUS_THRESHOLD}`, snap);
+        if (this._consecutiveBadCount < BAD_STATUS_THRESHOLD) return;
+        console.error(LOG_PREFIX, `_emitIfChanged() — threshold reached! Firing disconnect. status: ${snap.status}`);
+      } else {
+        if (this._consecutiveBadCount > 0) {
+          console.log(LOG_PREFIX, `_emitIfChanged() — status recovered to "${snap.status}", resetting badCount from ${this._consecutiveBadCount}`);
+        }
+        this._consecutiveBadCount = 0;
+      }
+
       if (snap.status !== this._lastStatus) {
+        console.log(LOG_PREFIX, `_emitIfChanged() — status changed: "${this._lastStatus}" → "${snap.status}", notifying ${this._listeners.size} listener(s)`);
         this._lastStatus = snap.status;
         this._listeners.forEach(fn => fn(snap));
       }
     }
   }
-  

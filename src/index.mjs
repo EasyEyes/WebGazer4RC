@@ -368,6 +368,27 @@ const hasLiveVideo = (stream) => {
 }
 
 let liveMonitor = null;
+let _isReconnecting = false;
+let _isSwappingCamera = false;
+
+function startOrUpdateLiveMonitor(stream) {
+  console.log('[CameraReconnect] startOrUpdateLiveMonitor called, liveMonitor exists:', !!liveMonitor, '_isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+  if (liveMonitor) {
+    liveMonitor.updateStream(stream, videoElement);
+    return;
+  }
+  liveMonitor = new VideoLiveMonitor(stream, videoElement);
+  liveMonitor.onChange((snap) => {
+    console.log('[CameraReconnect] onChange callback fired, status:', snap.status, '_isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+    if ((snap.status === 'ended' || snap.status === 'inactive') && !_isReconnecting && !_isSwappingCamera) {
+      console.error('[CameraReconnect] >>> TRIGGERING DISCONNECT POPUP <<<', snap);
+      showCameraReconnectionPopup(
+        `Camera status: ${snap.status} (track: ${snap.trackReadyState}, stream active: ${snap.streamActive})`
+      );
+    }
+  });
+  liveMonitor.start();
+}
 
 //PRIVATE FUNCTIONS
 
@@ -968,6 +989,8 @@ async function init(initMode = "all", stream) {
       e.target.removeEventListener(e.type, setupPreviewVideo);
     }
     videoElement.addEventListener("timeupdate", setupPreviewVideo);
+
+    startOrUpdateLiveMonitor(stream);
   }
 
   if (initMode != "video") {
@@ -1370,9 +1393,12 @@ webgazer.resume = async function () {
  * @return {webgazer} this
  */
 webgazer.end = function (endAll = false) {
-  // loop may run an extra time and fail due to removed elements
-  // webgazer.params.paused = true;
   if (endAll) {
+    if (liveMonitor) {
+      liveMonitor.stop();
+      liveMonitor = null;
+    }
+
     smoothingVals = new util.DataWindow(4);
     k = 0;
     _now = null;
@@ -1382,7 +1408,7 @@ webgazer.end = function (endAll = false) {
 
     webgazer.params.videoIsOn = false;
     setTimeout(() => {
-      webgazer.stopVideo(); // uncomment if you want to stop the video from streaming
+      webgazer.stopVideo();
 
       // remove video element and canvas
       videoContainerElement.remove();
@@ -1396,6 +1422,11 @@ webgazer.end = function (endAll = false) {
  * @return {webgazer} this
  */
 webgazer.stopVideo = function () {
+  if (liveMonitor) {
+    liveMonitor.stop();
+    liveMonitor = null;
+  }
+
   // Stops the video from streaming
   videoStream.getTracks()[0].stop();
 
@@ -1672,6 +1703,9 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
   const deviceId = constraints.video?.deviceId;
   
   if (videoStream) {
+    _isSwappingCamera = true;
+    if (liveMonitor) liveMonitor.pause();
+    console.log('[CameraReconnect] setCameraConstraints START — _isSwappingCamera = true, monitor paused');
     webgazer.pause();
     try {
       // Stop old stream
@@ -1695,6 +1729,7 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
         videoStream = stream;
         videoElement.srcObject = stream;
         setInternalVideoBufferSizes(w, h);
+        startOrUpdateLiveMonitor(stream);
 
         webgazer.videoParamsToReport = {
           height: h, width: w,
@@ -1777,6 +1812,7 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
         videoStream = stream;
         videoElement.srcObject = stream;
         setInternalVideoBufferSizes(w, h);
+        startOrUpdateLiveMonitor(stream);
 
         webgazer.videoParamsToReport = { 
           height: h, width: w,
@@ -1787,9 +1823,12 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
       }
 
     } catch (err) {
-      console.error(err);
+      console.error('[CameraReconnect] setCameraConstraints ERROR:', err);
+      _isSwappingCamera = false;
       return;
     }
+    console.log('[CameraReconnect] setCameraConstraints END — _isSwappingCamera = false');
+    _isSwappingCamera = false;
     await webgazer.resume();
   }
 };
@@ -1824,26 +1863,75 @@ webgazer.onCameraDisconnected = null;
  * This function can be overridden by the parent application to provide custom UI.
  * @param {string} message - The message to display
  */
+async function _enumerateCameras() {
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter(d => d.kind === 'videoinput');
+    }
+  } catch (e) {
+    console.warn('Could not enumerate cameras:', e);
+  }
+  return [];
+}
+
+function _buildCameraSelectHtml(cameras, currentId) {
+  if (cameras.length === 0) {
+    return '<p id="swal-no-cameras" style="color: #c33; margin-top: 0.5rem;">No cameras detected. Please reconnect a camera and click Scan.</p>';
+  }
+  const optionsHtml = cameras.map((cam, i) => {
+    const label = cam.label || `Camera ${i + 1}`;
+    const selected = cam.deviceId === currentId ? 'selected' : '';
+    return `<option value="${cam.deviceId}" ${selected}>${label}</option>`;
+  }).join('');
+  return `
+    <select id="swal-camera-select" style="width: 100%; padding: 0.5rem; font-size: 1rem; border: 1px solid #ccc; border-radius: 4px;">
+      ${optionsHtml}
+    </select>
+  `;
+}
+
 async function showCameraReconnectionPopup(message) {
-  console.warn("🚨 Camera Disconnected:", message);
-  
-  // If a custom callback is registered, use it
-  if (typeof webgazer.onCameraDisconnected === 'function') {
-    webgazer.onCameraDisconnected(message);
+  console.log('[CameraReconnect] showCameraReconnectionPopup called, _isReconnecting:', _isReconnecting);
+  if (_isReconnecting) {
+    console.log('[CameraReconnect] showCameraReconnectionPopup BLOCKED — already reconnecting');
     return;
   }
-  
-  // Default behavior: show SweetAlert2 popup with reconnect option
+  _isReconnecting = true;
+
+  if (liveMonitor) liveMonitor.pause();
+
+  console.warn("🚨 Camera Disconnected:", message);
+
+  if (typeof webgazer.onCameraDisconnected === 'function') {
+    webgazer.onCameraDisconnected(message);
+  }
+
+  let cameras = await _enumerateCameras();
+  const currentId = webgazer.params.activeCamera?.id || '';
+
+  let cameraPollId = null;
+
   const result = await Swal.fire({
     icon: 'error',
     title: 'Camera Disconnected',
     html: `
-      <p style="margin: 1rem 0; line-height: 1.6;">
-        ${message}
+      <p style="margin: 0.5rem 0; line-height: 1.6;">
+        Your camera has been disconnected. Please reconnect a camera, select it below, and click Reconnect.
       </p>
-      <p style="margin: 1rem 0; line-height: 1.6;">
-        Your camera has been disconnected. Please check your camera connection and try reconnecting.
-      </p>
+      <div style="margin: 1rem 0; text-align: left;">
+        <label for="swal-camera-select" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+          Select a camera:
+        </label>
+        <div id="swal-camera-list">
+          ${_buildCameraSelectHtml(cameras, currentId)}
+        </div>
+        <button id="swal-scan-cameras-btn" type="button"
+          style="margin-top: 0.6rem; padding: 0.4rem 1rem; font-size: 0.9rem; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f0f0f0;">
+          &#x1f50d; Scan for cameras
+        </button>
+        <span id="swal-scan-status" style="margin-left: 0.5rem; font-size: 0.85rem; color: #666;"></span>
+      </div>
     `,
     showCancelButton: true,
     confirmButtonText: 'Reconnect Camera',
@@ -1854,33 +1942,111 @@ async function showCameraReconnectionPopup(message) {
       popup: 'camera-reconnection-popup',
       confirmButton: 'swal2-confirm-reconnect',
       cancelButton: 'swal2-cancel'
+    },
+    didOpen: () => {
+      const scanBtn = document.getElementById('swal-scan-cameras-btn');
+      if (scanBtn) {
+        scanBtn.addEventListener('click', async () => {
+          const statusEl = document.getElementById('swal-scan-status');
+          if (statusEl) statusEl.textContent = 'Scanning...';
+          cameras = await _enumerateCameras();
+          const listEl = document.getElementById('swal-camera-list');
+          if (listEl) listEl.innerHTML = _buildCameraSelectHtml(cameras, currentId);
+          if (statusEl) statusEl.textContent = cameras.length ? `${cameras.length} camera(s) found` : 'No cameras found';
+        });
+      }
+
+      let prevCameraIds = cameras.map(c => c.deviceId).join(',');
+      cameraPollId = setInterval(async () => {
+        const fresh = await _enumerateCameras();
+        const freshIds = fresh.map(c => c.deviceId).join(',');
+        if (freshIds !== prevCameraIds) {
+          prevCameraIds = freshIds;
+          cameras = fresh;
+          const listEl = document.getElementById('swal-camera-list');
+          if (listEl) listEl.innerHTML = _buildCameraSelectHtml(cameras, currentId);
+          const statusEl = document.getElementById('swal-scan-status');
+          if (statusEl) statusEl.textContent = cameras.length ? `${cameras.length} camera(s) found` : '';
+        }
+      }, 2000);
+    },
+    willClose: () => {
+      if (cameraPollId) { clearInterval(cameraPollId); cameraPollId = null; }
+    },
+    preConfirm: () => {
+      const selectEl = document.getElementById('swal-camera-select');
+      if (!selectEl || !selectEl.value) {
+        Swal.showValidationMessage('Please select a camera or click Scan to find cameras.');
+        return false;
+      }
+      return selectEl.value;
     }
   });
 
   if (result.isConfirmed) {
-    // User clicked "Reconnect Camera"
+    Swal.fire({
+      title: 'Connecting...',
+      html: '<p style="margin: 0.5rem 0;">Please wait while the camera is being connected.</p>',
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      showConfirmButton: false,
+      didOpen: () => { Swal.showLoading(); },
+    });
+
     try {
-      console.log('Attempting to reconnect camera...');
-      
-      // Try to reinitialize the camera with existing constraints
+      const selectedDeviceId = result.value;
+      console.log('Attempting to reconnect camera, selected device:', selectedDeviceId);
+
+      const selectedCam = cameras.find(c => c.deviceId === selectedDeviceId);
+      webgazer.params.activeCamera.id = selectedDeviceId;
+      webgazer.params.activeCamera.label = selectedCam?.label || '';
+
       if (webgazer.params.camConstraints) {
-        await webgazer.setCameraConstraints(webgazer.params.camConstraints);
-        
-        // Show success message
+        const constraints = {
+          video: {
+            deviceId: { exact: selectedDeviceId },
+            facingMode: 'user',
+          },
+        };
+
+        const prevReport = webgazer.videoParamsToReport || {};
+        const knownRes = (prevReport.width && prevReport.height)
+          ? { width: prevReport.width, height: prevReport.height }
+          : null;
+
+        const savedDesiredRes = webgazer.params.desiredCameraResolution;
+        const savedDesiredHz = webgazer.params.desiredCameraHz;
+        webgazer.params.desiredCameraResolution = null;
+        webgazer.params.desiredCameraHz = null;
+
+        console.log('[CameraReconnect] Calling setCameraConstraints (light path, no probing). knownRes:', knownRes);
+        await webgazer.setCameraConstraints(constraints, knownRes);
+
+        webgazer.params.desiredCameraResolution = savedDesiredRes;
+        webgazer.params.desiredCameraHz = savedDesiredHz;
+        console.log('[CameraReconnect] setCameraConstraints completed. _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+
+        if (typeof webgazer.onCameraReconnected === 'function') {
+          console.log('[CameraReconnect] Firing onCameraReconnected callback');
+          webgazer.onCameraReconnected();
+        }
+
+        console.log('[CameraReconnect] Showing success Swal. Flags: _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
         await Swal.fire({
           icon: 'success',
           title: 'Camera Reconnected',
-          text: 'Your camera has been successfully reconnected.',
-          timer: 2000,
-          showConfirmButton: false
+          text: 'Your camera has been successfully reconnected. Press OK to continue the experiment.',
+          confirmButtonText: 'OK',
+          allowOutsideClick: false,
+          allowEscapeKey: false,
         });
+        console.log('[CameraReconnect] Success Swal closed');
       } else {
         throw new Error('No camera constraints available');
       }
     } catch (error) {
-      console.error('Failed to reconnect camera:', error);
-      
-      // Show error and ask if they want to try again
+      console.error('[CameraReconnect] Failed to reconnect camera:', error);
+
       const retryResult = await Swal.fire({
         icon: 'error',
         title: 'Reconnection Failed',
@@ -1889,13 +2055,17 @@ async function showCameraReconnectionPopup(message) {
         confirmButtonText: 'Try Again',
         cancelButtonText: 'Cancel'
       });
-      
+
       if (retryResult.isConfirmed) {
-        // Recursively try again
+        console.log('[CameraReconnect] Retrying — resetting _isReconnecting');
+        _isReconnecting = false;
         await showCameraReconnectionPopup(message);
+        return;
       }
     }
   }
+  console.log('[CameraReconnect] showCameraReconnectionPopup DONE — setting _isReconnecting = false');
+  _isReconnecting = false;
 }
 
 /**
@@ -1906,6 +2076,22 @@ async function showCameraReconnectionPopup(message) {
  */
 webgazer.setOnCameraDisconnected = function(callback) {
   webgazer.onCameraDisconnected = callback;
+  return webgazer;
+};
+
+/**
+ * Callback function for camera reconnection events.
+ * @type {Function|null}
+ */
+webgazer.onCameraReconnected = null;
+
+/**
+ * Set a custom callback for successful camera reconnection events.
+ * @param {Function} callback - Function to call when camera is reconnected
+ * @return {webgazer} this
+ */
+webgazer.setOnCameraReconnected = function(callback) {
+  webgazer.onCameraReconnected = callback;
   return webgazer;
 };
 
