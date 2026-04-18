@@ -1889,7 +1889,37 @@ function _getPhrase(key) {
   return value;
 }
 
+function _dimPageContent() {
+  for (const child of document.body.children) {
+    if (child.classList && child.classList.contains('swal2-container')) continue;
+    child.dataset.rcOriginalFilter = child.style.filter || '';
+    child.style.filter = 'contrast(0.5)';
+  }
+}
+
+function _makeSwalBackdropTransparent() {
+  const swalContainer = document.querySelector('.swal2-container');
+  if (swalContainer) {
+    swalContainer.style.setProperty('background', 'transparent', 'important');
+    swalContainer.style.setProperty('background-color', 'transparent', 'important');
+  }
+}
+
+function _restorePageContrast() {
+  for (const child of document.body.children) {
+    if (child.classList && child.classList.contains('swal2-container')) continue;
+    if ('rcOriginalFilter' in (child.dataset || {})) {
+      child.style.filter = child.dataset.rcOriginalFilter;
+      delete child.dataset.rcOriginalFilter;
+    } else {
+      child.style.filter = '';
+    }
+  }
+}
+
 function _styleReconnectSwal() {
+  _makeSwalBackdropTransparent();
+
   const confirmBtn = Swal.getConfirmButton();
   if (confirmBtn) {
     confirmBtn.style.backgroundColor = '#28a745';
@@ -1981,6 +2011,8 @@ async function showCameraReconnectionPopup(message) {
     webgazer.onCameraDisconnected(message);
   }
 
+  _dimPageContent();
+
   const titleText = _getPhrase('RC_CameraReconnectTitle');
   const bodyText = _getPhrase('RC_CameraReconnectText');
   const resumeText = _getPhrase('RC_Resume');
@@ -1998,8 +2030,10 @@ async function showCameraReconnectionPopup(message) {
     cancelButtonText: quitText,
     allowEscapeKey: false,
     allowOutsideClick: false,
+    backdrop: 'rgba(0,0,0,0)',
     reverseButtons: false,
     customClass: {
+      container: 'camera-reconnect-container',
       popup: 'camera-reconnection-popup',
       confirmButton: 'swal2-confirm-resume',
       cancelButton: 'swal2-cancel-quit',
@@ -2014,7 +2048,11 @@ async function showCameraReconnectionPopup(message) {
       allowOutsideClick: false,
       allowEscapeKey: false,
       showConfirmButton: false,
-      didOpen: () => { Swal.showLoading(); },
+      backdrop: 'rgba(0,0,0,0)',
+      customClass: {
+        container: 'camera-reconnect-container',
+      },
+      didOpen: () => { _makeSwalBackdropTransparent(); Swal.showLoading(); },
     });
 
     let reconnected = false;
@@ -2028,6 +2066,7 @@ async function showCameraReconnectionPopup(message) {
 
     if (reconnected) {
       console.log('[CameraReconnect] Successfully reconnected original camera');
+      _restorePageContrast();
       Swal.close();
     } else {
       const cameraLabel = webgazer.params.activeCamera?.label || '';
@@ -2047,8 +2086,10 @@ async function showCameraReconnectionPopup(message) {
         cancelButtonText: quitText,
         allowEscapeKey: false,
         allowOutsideClick: false,
+        backdrop: 'rgba(0,0,0,0)',
         reverseButtons: false,
         customClass: {
+          container: 'camera-reconnect-container',
           popup: 'camera-reconnection-popup',
           confirmButton: 'swal2-confirm-resume',
           cancelButton: 'swal2-cancel-quit',
@@ -2058,16 +2099,19 @@ async function showCameraReconnectionPopup(message) {
 
       if (retryResult.isConfirmed) {
         console.log('[CameraReconnect] Retrying — resetting _isReconnecting');
+        _restorePageContrast();
         _isReconnecting = false;
         await showCameraReconnectionPopup(message);
         return;
       } else {
         console.log('[CameraReconnect] Quit button pressed');
+        _restorePageContrast();
         if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
       }
     }
   } else {
     console.log('[CameraReconnect] Quit button pressed');
+    _restorePageContrast();
     if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
   }
   console.log('[CameraReconnect] showCameraReconnectionPopup DONE — setting _isReconnecting = false');
