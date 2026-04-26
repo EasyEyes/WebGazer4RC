@@ -1906,6 +1906,7 @@ function _makeSwalBackdropTransparent() {
 }
 
 function _restorePageContrast() {
+  _cleanupReconnectOverlay();
   for (const child of document.body.children) {
     if (child.classList && child.classList.contains('swal2-container')) continue;
     if ('rcOriginalFilter' in (child.dataset || {})) {
@@ -1914,6 +1915,92 @@ function _restorePageContrast() {
     } else {
       child.style.filter = '';
     }
+  }
+}
+
+const RC_SNAPSHOT_ID = 'rc-reconnect-page-snapshot';
+
+/**
+ * Prepare the page for the reconnection popup:
+ *  1. Hide the EasyEyes calibration panel (`rc-panel-holder`) so it
+ *     doesn't show through when the current Swal is replaced.
+ *  2. Clone ONLY the Swal popup (which contains camera previews,
+ *     arrow, privacy text, etc.) and body-level fixed elements
+ *     (`rc-camera-title-top-right`, `rc-resolution-video-wrapper`,
+ *     `rc-resolution-setting-message`) that `willClose` will remove.
+ *  3. Place the clones in a full-viewport white overlay so the
+ *     participant sees the correct page dimmed behind the popup.
+ */
+function _prepareReconnectOverlay() {
+  _cleanupReconnectOverlay();
+
+  // Hide the EasyEyes calibration panel — save its display so we
+  // can restore it later.
+  const panel = document.getElementById('rc-panel-holder');
+  if (panel) {
+    panel.dataset.rcSavedDisplay = panel.style.display || '';
+    panel.style.display = 'none';
+  }
+
+  // Full-viewport opaque wrapper that sits above everything except
+  // the reconnection Swal (SweetAlert2 uses z-index ~1060).
+  const wrapper = document.createElement('div');
+  wrapper.id = RC_SNAPSHOT_ID;
+  wrapper.style.cssText =
+    'position:fixed;top:0;left:0;width:100vw;height:100vh;' +
+    'z-index:999;pointer-events:none;background:#fff;overflow:hidden;';
+
+  let hasContent = false;
+
+  // Clone the active Swal popup (camera selection, resolution, etc.).
+  // Elements like camera previews, arrow, and privacy text live INSIDE
+  // the popup — cloning the popup captures them all in one go.
+  const swalPopup = document.querySelector('.swal2-popup');
+  if (swalPopup) {
+    const clone = swalPopup.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.style.position = 'fixed';
+    clone.style.top = '50%';
+    clone.style.left = '50%';
+    clone.style.transform = 'translate(-50%, -50%)';
+    clone.style.margin = '0';
+    clone.style.pointerEvents = 'none';
+    clone.querySelectorAll('video').forEach(v => { try { v.pause(); v.srcObject = null; } catch(_){} });
+    wrapper.appendChild(clone);
+    hasContent = true;
+  }
+
+  // Clone body-level fixed elements that sit OUTSIDE the Swal and
+  // would be removed by the Swal's willClose handler.
+  const outsideSwalIds = [
+    'rc-camera-title-top-right',
+    'rc-resolution-video-wrapper',
+    'rc-resolution-setting-message',
+  ];
+  for (const id of outsideSwalIds) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const clone = el.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.style.pointerEvents = 'none';
+    wrapper.appendChild(clone);
+    hasContent = true;
+  }
+
+  if (!hasContent) { wrapper.remove(); return; }
+  document.body.appendChild(wrapper);
+}
+
+function _cleanupReconnectOverlay() {
+  // Remove the snapshot overlay
+  const snapshot = document.getElementById(RC_SNAPSHOT_ID);
+  if (snapshot) snapshot.remove();
+
+  // Restore the EasyEyes calibration panel
+  const panel = document.getElementById('rc-panel-holder');
+  if (panel && 'rcSavedDisplay' in (panel.dataset || {})) {
+    panel.style.display = panel.dataset.rcSavedDisplay;
+    delete panel.dataset.rcSavedDisplay;
   }
 }
 
@@ -2011,11 +2098,20 @@ async function showCameraReconnectionPopup(message) {
     webgazer.onCameraDisconnected(message);
   }
 
+  // Hide the EasyEyes panel and snapshot the current page so the
+  // participant sees the correct background (dimmed) behind the
+  // reconnection popup instead of the calibration panel.
+  _prepareReconnectOverlay();
+
+  // Close any existing Swal so its willClose handler runs and cleans up.
+  // The overlay already captured the visual state, so losing the Swal is fine.
+  Swal.close();
+
   _dimPageContent();
 
   const titleText = _getPhrase('RC_CameraReconnectTitle');
   const bodyText = _getPhrase('RC_CameraReconnectText');
-  const resumeText = _getPhrase('RC_Resume');
+  const resumeText = _getPhrase('RC_Proceed');
   const quitText = _getPhrase('RC_Quit');
 
   const result = await Swal.fire({
@@ -2041,7 +2137,18 @@ async function showCameraReconnectionPopup(message) {
     didOpen: _styleReconnectSwal,
   });
 
-  if (result.isConfirmed) {
+  if (!result.isConfirmed) {
+    console.log('[CameraReconnect] Quit button pressed');
+    _restorePageContrast();
+    if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
+    _isReconnecting = false;
+    return;
+  }
+
+  // Retry loop: try to reconnect, and if the camera is still missing,
+  // always show the "Sorry. Can't find ..." page (never go back to
+  // the initial "To save power ..." page).
+  while (true) {
     Swal.fire({
       title: undefined,
       html: undefined,
@@ -2056,64 +2163,53 @@ async function showCameraReconnectionPopup(message) {
     });
 
     let reconnected = false;
-    let reconnectError = null;
     try {
       reconnected = await _tryReconnectOriginalCamera();
     } catch (error) {
       console.error('[CameraReconnect] Failed to reconnect camera:', error);
-      reconnectError = error;
     }
 
     if (reconnected) {
       console.log('[CameraReconnect] Successfully reconnected original camera');
       _restorePageContrast();
       Swal.close();
-    } else {
-      const cameraLabel = webgazer.params.activeCamera?.label || '';
-      const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
-      const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
-      if (reconnectError) {
-        console.log('[CameraReconnect] Reconnect threw error, showing cant-find message');
-      }
-
-      const retryResult = await Swal.fire({
-        icon: undefined,
-        title: titleText,
-        html: `<p style="margin: 0.5rem 0; line-height: 1.6;">${cantFindText}</p>`,
-        showConfirmButton: true,
-        showCancelButton: true,
-        confirmButtonText: resumeText,
-        cancelButtonText: quitText,
-        allowEscapeKey: false,
-        allowOutsideClick: false,
-        backdrop: 'rgba(0,0,0,0)',
-        reverseButtons: false,
-        customClass: {
-          container: 'camera-reconnect-container',
-          popup: 'camera-reconnection-popup',
-          confirmButton: 'swal2-confirm-resume',
-          cancelButton: 'swal2-cancel-quit',
-        },
-        didOpen: _styleReconnectSwal,
-      });
-
-      if (retryResult.isConfirmed) {
-        console.log('[CameraReconnect] Retrying — resetting _isReconnecting');
-        _restorePageContrast();
-        _isReconnecting = false;
-        await showCameraReconnectionPopup(message);
-        return;
-      } else {
-        console.log('[CameraReconnect] Quit button pressed');
-        _restorePageContrast();
-        if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
-      }
+      break;
     }
-  } else {
-    console.log('[CameraReconnect] Quit button pressed');
-    _restorePageContrast();
-    if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
+
+    const cameraLabel = webgazer.params.activeCamera?.label || '';
+    const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
+    const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
+
+    const retryResult = await Swal.fire({
+      icon: undefined,
+      title: titleText,
+      html: `<p style="margin: 0.5rem 0; line-height: 1.6;">${cantFindText}</p>`,
+      showConfirmButton: true,
+      showCancelButton: true,
+      confirmButtonText: resumeText,
+      cancelButtonText: quitText,
+      allowEscapeKey: false,
+      allowOutsideClick: false,
+      backdrop: 'rgba(0,0,0,0)',
+      reverseButtons: false,
+      customClass: {
+        container: 'camera-reconnect-container',
+        popup: 'camera-reconnection-popup',
+        confirmButton: 'swal2-confirm-resume',
+        cancelButton: 'swal2-cancel-quit',
+      },
+      didOpen: _styleReconnectSwal,
+    });
+
+    if (!retryResult.isConfirmed) {
+      console.log('[CameraReconnect] Quit button pressed');
+      _restorePageContrast();
+      if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
+      break;
+    }
+    console.log('[CameraReconnect] Retrying camera reconnection');
   }
+
   console.log('[CameraReconnect] showCameraReconnectionPopup DONE — setting _isReconnecting = false');
   _isReconnecting = false;
 }
