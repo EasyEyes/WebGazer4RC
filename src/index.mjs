@@ -1832,6 +1832,67 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
     await webgazer.resume();
   }
 };
+
+/**
+ * Fast-path camera reconnect: open a stream and apply exact constraints for a
+ * previously-known resolution and frame rate, skipping the full probing sweep.
+ * Throws if the exact mode cannot be applied so the caller can fall back.
+ */
+webgazer.setCameraConstraintsDirect = async function (constraints, width, height, frameRate) {
+  const deviceId = constraints.video?.deviceId;
+
+  if (videoStream) {
+    _isSwappingCamera = true;
+    if (liveMonitor) liveMonitor.pause();
+    console.log('[CameraReconnect] setCameraConstraintsDirect START — _isSwappingCamera = true, monitor paused');
+    webgazer.pause();
+    try {
+      videoStream.getVideoTracks().forEach(t => t.stop());
+
+      const rawDeviceId = deviceId?.exact || deviceId;
+      const videoConstraints = rawDeviceId
+        ? { deviceId: { exact: rawDeviceId } }
+        : { facingMode: 'user' };
+      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      const track = stream.getVideoTracks()[0];
+
+      await track.applyConstraints({
+        width: { exact: width },
+        height: { exact: height },
+        frameRate: { ideal: frameRate }
+      });
+
+      const settings = track.getSettings();
+      const w = settings.width;
+      const h = settings.height;
+      const actualFR = settings.frameRate || 0;
+      console.log(`setCameraConstraintsDirect: ${w}x${h} @ ${actualFR}Hz`);
+
+      const cap = typeof track.getCapabilities === 'function' ? track.getCapabilities() : null;
+
+      videoStream = stream;
+      videoElement.srcObject = stream;
+      setInternalVideoBufferSizes(w, h);
+      startOrUpdateLiveMonitor(stream);
+
+      webgazer.videoParamsToReport = {
+        height: h, width: w,
+        maxHeight: cap?.height?.max || h,
+        maxWidth: cap?.width?.max || w,
+        frameRate: actualFR,
+        maxFrameRate: cap?.frameRate?.max || actualFR
+      };
+    } catch (err) {
+      console.error('[CameraReconnect] setCameraConstraintsDirect ERROR:', err);
+      _isSwappingCamera = false;
+      throw err;
+    }
+    console.log('[CameraReconnect] setCameraConstraintsDirect END — _isSwappingCamera = false');
+    _isSwappingCamera = false;
+    await webgazer.resume();
+  }
+};
+
 /**
  * Does what it says on the tin.
  * @param {*} width
@@ -2056,21 +2117,25 @@ async function _tryReconnectOriginalCamera() {
   };
 
   const prevReport = webgazer.videoParamsToReport || {};
-  const knownRes = (prevReport.width && prevReport.height)
-    ? { width: prevReport.width, height: prevReport.height }
-    : null;
+  const prevWidth = prevReport.width;
+  const prevHeight = prevReport.height;
+  const prevFrameRate = prevReport.frameRate;
 
-  const savedDesiredRes = webgazer.params.desiredCameraResolution;
-  const savedDesiredHz = webgazer.params.desiredCameraHz;
-  webgazer.params.desiredCameraResolution = null;
-  webgazer.params.desiredCameraHz = null;
-
-  console.log('[CameraReconnect] Calling setCameraConstraints (light path, no probing). knownRes:', knownRes);
-  await webgazer.setCameraConstraints(constraints, knownRes);
-
-  webgazer.params.desiredCameraResolution = savedDesiredRes;
-  webgazer.params.desiredCameraHz = savedDesiredHz;
-  console.log('[CameraReconnect] setCameraConstraints completed. _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+  if (prevWidth && prevHeight && prevFrameRate) {
+    console.log(`[CameraReconnect] Trying fast reconnect: ${prevWidth}x${prevHeight} @ ${prevFrameRate}Hz`);
+    try {
+      await webgazer.setCameraConstraintsDirect(constraints, prevWidth, prevHeight, prevFrameRate);
+      console.log('[CameraReconnect] Fast reconnect succeeded. _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+    } catch (fastErr) {
+      console.warn('[CameraReconnect] Fast reconnect failed, falling back to full probing:', fastErr);
+      await webgazer.setCameraConstraints(constraints, null);
+      console.log('[CameraReconnect] Full-probing fallback completed. _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+    }
+  } else {
+    console.log('[CameraReconnect] No previous resolution/Hz known, using full probing.');
+    await webgazer.setCameraConstraints(constraints, null);
+    console.log('[CameraReconnect] setCameraConstraints completed. _isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+  }
 
   if (typeof webgazer.onCameraReconnected === 'function') {
     console.log('[CameraReconnect] Firing onCameraReconnected callback');
@@ -2148,10 +2213,21 @@ async function showCameraReconnectionPopup(message) {
   // Retry loop: try to reconnect, and if the camera is still missing,
   // always show the "Sorry. Can't find ..." page (never go back to
   // the initial "To save power ..." page).
+  const prevReport = webgazer.videoParamsToReport || {};
+  const spinnerResText = (prevReport.width && prevReport.height)
+    ? `${prevReport.width}x${prevReport.height}`
+    : '';
+  const spinnerHzText = prevReport.frameRate
+    ? `${Math.round(prevReport.frameRate)} Hz`
+    : '';
+  const spinnerDetail = (spinnerResText && spinnerHzText)
+    ? `[[RC_CameraReconnecting]] ${spinnerResText} @ ${spinnerHzText}…`
+    : `[[RC_CameraReconnecting]]…`;
+
   while (true) {
     Swal.fire({
       title: undefined,
-      html: undefined,
+      html: `<p style="margin: 0.5rem 0; line-height: 1.6; font-size: 0.95rem; color: #555;">${spinnerDetail}</p>`,
       allowOutsideClick: false,
       allowEscapeKey: false,
       showConfirmButton: false,
@@ -2162,6 +2238,7 @@ async function showCameraReconnectionPopup(message) {
       didOpen: () => { _makeSwalBackdropTransparent(); Swal.showLoading(); },
     });
 
+    const spinnerStart = performance.now();
     let reconnected = false;
     try {
       reconnected = await _tryReconnectOriginalCamera();
@@ -2170,6 +2247,11 @@ async function showCameraReconnectionPopup(message) {
     }
 
     if (reconnected) {
+      const elapsed = performance.now() - spinnerStart;
+      const MIN_SPINNER_MS = 2000;
+      if (elapsed < MIN_SPINNER_MS) {
+        await new Promise(r => setTimeout(r, MIN_SPINNER_MS - elapsed));
+      }
       console.log('[CameraReconnect] Successfully reconnected original camera');
       _restorePageContrast();
       Swal.close();
