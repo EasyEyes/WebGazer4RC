@@ -2213,16 +2213,34 @@ async function showCameraReconnectionPopup(message) {
   // Retry loop: try to reconnect, and if the camera is still missing,
   // always show the "Sorry. Can't find ..." page (never go back to
   // the initial "To save power ..." page).
+  //
+  // Build the spinner text from the i18n phrase
+  // RC_CameraReconnecting = "Reconnecting camera at [[RRR]] ..."
+  // where [[RRR]] is replaced with the previous camera mode in the form
+  // "WIDTH × HEIGHT, FRAMERATE Hz" (integers, e.g. "640 × 480, 15 Hz").
+  // If we have no previous resolution/Hz info we drop the " at [[RRR]]"
+  // segment entirely.
   const prevReport = webgazer.videoParamsToReport || {};
-  const spinnerResText = (prevReport.width && prevReport.height)
-    ? `${prevReport.width}x${prevReport.height}`
+  const haveRes = prevReport.width && prevReport.height;
+  const haveHz = !!prevReport.frameRate;
+  const rrrText = (haveRes && haveHz)
+    ? `${Math.round(prevReport.width)} \u00d7 ${Math.round(prevReport.height)}, ${Math.round(prevReport.frameRate)} Hz`
     : '';
-  const spinnerHzText = prevReport.frameRate
-    ? `${Math.round(prevReport.frameRate)} Hz`
-    : '';
-  const spinnerDetail = (spinnerResText && spinnerHzText)
-    ? `[[RC_CameraReconnecting]] ${spinnerResText} @ ${spinnerHzText}…`
-    : `[[RC_CameraReconnecting]]…`;
+
+  const reconnectingTemplate = _getPhrase('RC_CameraReconnecting')
+    || 'Reconnecting camera at [[RRR]] ...';
+
+  let spinnerDetail;
+  if (rrrText) {
+    spinnerDetail = reconnectingTemplate.replace(/\[\[RRR\]\]/gi, rrrText);
+  } else {
+    // Drop " at [[RRR]]" (with the leading space and any surrounding
+    // whitespace) when we have no resolution info, so the message reads
+    // naturally as "Reconnecting camera ...".
+    spinnerDetail = reconnectingTemplate
+      .replace(/\s*at\s*\[\[RRR\]\]/gi, '')
+      .replace(/\[\[RRR\]\]/gi, '');
+  }
 
   while (true) {
     Swal.fire({
