@@ -2175,16 +2175,12 @@ async function showCameraReconnectionPopup(message) {
   _dimPageContent();
 
   const titleText = _getPhrase('RC_CameraReconnectTitle');
-  const bodyText = _getPhrase('RC_CameraReconnectText');
   const resumeText = _getPhrase('RC_Proceed');
   const quitText = _getPhrase('RC_Quit');
 
   const result = await Swal.fire({
     icon: undefined,
     title: titleText,
-    html: `
-      <p style="margin: 0.5rem 0; line-height: 1.6;">${bodyText}</p>
-    `,
     showConfirmButton: true,
     showCancelButton: true,
     confirmButtonText: resumeText,
