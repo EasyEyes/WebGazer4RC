@@ -1950,6 +1950,14 @@ function _getPhrase(key) {
   return value;
 }
 
+// True when the participant's currently-selected language reads
+// right-to-left (e.g. Arabic, Hebrew). Driven by RC, which writes
+// `languageDirection` into webgazer.params on init and on every
+// language change (see GazeTracker.setupCameraMonitoring).
+function _isRTL() {
+  return (webgazer.params.languageDirection || 'LTR').toUpperCase() === 'RTL';
+}
+
 function _dimPageContent() {
   for (const child of document.body.children) {
     if (child.classList && child.classList.contains('swal2-container')) continue;
@@ -2068,6 +2076,27 @@ function _cleanupReconnectOverlay() {
 function _styleReconnectSwal() {
   _makeSwalBackdropTransparent();
 
+  const isRTL = _isRTL();
+
+  // Apply RTL/LTR direction at the popup level so the title, body
+  // text, and any inline content inherit the correct reading
+  // direction. Buttons are reordered separately via Swal's
+  // `reverseButtons` option (see showCameraReconnectionPopup).
+  const popup = Swal.getPopup();
+  if (popup) {
+    popup.dir = isRTL ? 'rtl' : 'ltr';
+  }
+  const title = Swal.getTitle();
+  if (title) {
+    title.dir = isRTL ? 'rtl' : 'ltr';
+    title.style.textAlign = 'center';
+  }
+  const htmlContainer = Swal.getHtmlContainer();
+  if (htmlContainer) {
+    htmlContainer.dir = isRTL ? 'rtl' : 'ltr';
+    htmlContainer.style.textAlign = 'center';
+  }
+
   const confirmBtn = Swal.getConfirmButton();
   if (confirmBtn) {
     confirmBtn.style.backgroundColor = '#28a745';
@@ -2089,6 +2118,14 @@ function _styleReconnectSwal() {
     actions.style.justifyContent = 'space-between';
     actions.style.width = '100%';
     actions.style.padding = '0 1rem';
+    // Mirror button order with the page direction:
+    //   LTR: [ Proceed ........ Quit ]
+    //   RTL: [ Quit ........ Proceed ]
+    // Setting `dir` on the flex container is enough — flexbox
+    // auto-mirrors children when the writing direction is rtl, and
+    // `justify-content: space-between` keeps them pinned to the
+    // outer edges in both cases.
+    actions.dir = isRTL ? 'rtl' : 'ltr';
   }
 }
 
@@ -2239,9 +2276,11 @@ async function showCameraReconnectionPopup(message) {
   }
 
   while (true) {
+    const isRTLNow = _isRTL();
+    const spinnerDir = isRTLNow ? 'rtl' : 'ltr';
     Swal.fire({
       title: undefined,
-      html: `<p style="margin: 0.5rem 0; line-height: 1.6; font-size: 0.95rem; color: #555;">${spinnerDetail}</p>`,
+      html: `<p dir="${spinnerDir}" style="margin: 0.5rem 0; line-height: 1.6; font-size: 0.95rem; color: #555; text-align: center; direction: ${spinnerDir};">${spinnerDetail}</p>`,
       allowOutsideClick: false,
       allowEscapeKey: false,
       showConfirmButton: false,
@@ -2249,7 +2288,12 @@ async function showCameraReconnectionPopup(message) {
       customClass: {
         container: 'camera-reconnect-container',
       },
-      didOpen: () => { _makeSwalBackdropTransparent(); Swal.showLoading(); },
+      didOpen: () => {
+        _makeSwalBackdropTransparent();
+        const popup = Swal.getPopup();
+        if (popup) popup.dir = spinnerDir;
+        Swal.showLoading();
+      },
     });
 
     const spinnerStart = performance.now();
@@ -2275,11 +2319,13 @@ async function showCameraReconnectionPopup(message) {
     const cameraLabel = webgazer.params.activeCamera?.label || '';
     const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
     const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
+    const isRTLRetry = _isRTL();
+    const retryDir = isRTLRetry ? 'rtl' : 'ltr';
 
     const retryResult = await Swal.fire({
       icon: undefined,
       title: titleText,
-      html: `<p style="margin: 0.5rem 0; line-height: 1.6;">${cantFindText}</p>`,
+      html: `<p dir="${retryDir}" style="margin: 0.5rem 0; line-height: 1.6; text-align: center; direction: ${retryDir};">${cantFindText}</p>`,
       showConfirmButton: true,
       showCancelButton: true,
       confirmButtonText: resumeText,
