@@ -21,7 +21,18 @@ export class VideoLiveMonitor {
       this._tickCount = 0;
   
       // bind handlers
-      this._onEnded = () => { console.warn(LOG_PREFIX, 'Track "ended" event fired'); this._emitIfChanged(); };
+      //
+      // `track.ended` is a definitive signal that the active video
+      // device is gone (unplugged, OS revoked permission, OS-level
+      // device error). It's NOT the kind of transient bad status the
+      // grace period + 3-strike threshold is meant to filter out — yet
+      // `_emitIfChanged()` would still suppress it during the 5s
+      // post-switch grace window. That suppression breaks downstream
+      // flows that legitimately need to react to the camera vanishing
+      // shortly after the participant chose it (e.g. the unknown-camera
+      // confirmation modal). Use `_emitImmediate` so a real `ended`
+      // event always fires, regardless of grace / threshold state.
+      this._onEnded = () => { console.warn(LOG_PREFIX, 'Track "ended" event fired — emitting immediately (bypass grace/threshold)'); this._emitImmediate('ended'); };
       this._onMuteUnmute = () => { console.log(LOG_PREFIX, 'Track mute/unmute event fired, muted:', this.track?.muted); this._emitIfChanged(); };
       this._onDeviceChange = () => { console.log(LOG_PREFIX, 'devicechange event fired'); this._emitIfChanged(); };
 
@@ -115,6 +126,21 @@ export class VideoLiveMonitor {
       return {
         status, trackReadyState: trackReady, muted, streamActive, videoReadyState: vrs
       };
+    }
+
+    // Force an immediate emission with the given status, bypassing both
+    // the post-switch grace window and the consecutive-bad-status
+    // threshold. Reserved for events whose meaning is unambiguous
+    // (e.g. MediaStreamTrack's `ended` event), so that legitimate
+    // disconnects are never silently swallowed.
+    _emitImmediate(forcedStatus) {
+      const baseSnap = this._snapshot();
+      const snap = forcedStatus ? { ...baseSnap, status: forcedStatus } : baseSnap;
+      console.warn(LOG_PREFIX, `_emitImmediate() — forcing status "${snap.status}" (was "${this._lastStatus}"), notifying ${this._listeners.size} listener(s)`);
+      this._lastStatus = snap.status;
+      this._consecutiveBadCount = 0;
+      this._graceUntil = 0;
+      this._listeners.forEach(fn => fn(snap));
     }
 
     _emitIfChanged() {

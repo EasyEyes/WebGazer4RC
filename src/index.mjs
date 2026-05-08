@@ -2011,6 +2011,32 @@ function _prepareReconnectOverlay() {
     panel.style.display = 'none';
   }
 
+  // Remove the Choose Camera bottom-row preview wrapper (which was
+  // previously promoted to <body> by _promoteCameraPreviewsBottomToBody)
+  // BEFORE we capture the snapshot and dim the page. The owning Swal's
+  // willClose handler is supposed to clean this up, but its timing is
+  // not synchronously guaranteed across all SweetAlert versions and
+  // browsers. Clearing it here ensures the participant never sees a
+  // stale bottom-row tile fixed to the viewport behind the
+  // reconnection popup. The element is re-created from scratch when
+  // the Choose Camera page is rebuilt after reconnect.
+  let staleBottomOuter = document.getElementById('rc-camera-previews-bottom-outer');
+  while (staleBottomOuter) {
+    console.log('[CameraReconnect] _prepareReconnectOverlay: removing stale rc-camera-previews-bottom-outer');
+    // Stop any video tracks still attached to bottom-row previews so
+    // they don't keep the camera busy after the participant pulls it.
+    staleBottomOuter.querySelectorAll('video').forEach(v => {
+      try {
+        if (v.srcObject) {
+          v.srcObject.getTracks().forEach(t => t.stop());
+        }
+        v.srcObject = null;
+      } catch (_) { /* noop */ }
+    });
+    staleBottomOuter.remove();
+    staleBottomOuter = document.getElementById('rc-camera-previews-bottom-outer');
+  }
+
   // Full-viewport opaque wrapper that sits above everything except
   // the reconnection Swal (SweetAlert2 uses z-index ~1060).
   const wrapper = document.createElement('div');
