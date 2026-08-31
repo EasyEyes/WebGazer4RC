@@ -1,61 +1,99 @@
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
 import { useFullRangeModel } from './useFullRangeModel.mjs';
 
-const isOnline = () => {
-  return navigator.onLine
-}
+const MODEL_LOAD_ATTEMPTS = 3;
+const MODEL_LOAD_RETRY_DELAY_MS = 700;
+
+const _detectorConfig = refineLandmarks => ({
+  runtime: 'tfjs',
+  detectorModelUrl: './models/detector/model.json',
+  landmarkModelUrl: refineLandmarks ? './models/landmark_attention/model.json' : './models/landmark/model.json',
+  refineLandmarks: refineLandmarks,
+});
 
 /**
  * Constructor of TFFaceMesh object
  * @constructor
  * */
 const TFFaceMesh = function(refineLandmarks = true) {
-  this.model = faceLandmarksDetection.createDetector(
-    faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-    { 
-      runtime: 'tfjs',
-      // detectorModelUrl: isOnline() ? 'https://tfhub.dev/mediapipe/tfjs-model/face_detection/full/1' : './models/detector/model.json',
-      // landmarkModelUrl: isOnline() ? undefined : './models/landmark/model.json',
-      detectorModelUrl: './models/detector/model.json',
-      landmarkModelUrl: refineLandmarks? './models/landmark_attention/model.json' : './models/landmark/model.json',
-      refineLandmarks: refineLandmarks
-    }
-  );
-
+  this.refineLandmarks = refineLandmarks;
+  this.model = null;
   this.predictionReady = false;
   this.modelLoaded = false;
 };
 
-const _modelLoadingInProgress = { current: false, resolves: [] };
+const _modelLoadingInProgress = { current: false, resolves: [], rejects: [] };
 
+const _sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Download and initialize the face landmark model.
+ *
+ * The model weights are several megabytes fetched over the network, so this
+ * can fail transiently -- and a rejection here used to be fatal: the
+ * detector promise was created in the constructor and left unhandled, so a
+ * failed download surfaced as an unhandled rejection. PsychoJS installs a
+ * `window.onunhandledrejection` handler that aborts the whole experiment,
+ * meaning one flaky fetch ended the participant's session.
+ *
+ * The download therefore starts here rather than in the constructor (so the
+ * promise always has a handler attached), and is retried before giving up.
+ */
 TFFaceMesh.prototype.loadModel = async function() {
   if (this.modelLoaded) return;
-  
-  if (_modelLoadingInProgress.current) {
-    // add a promise to the list of promises to be resolved when the model is loaded
-    const promise = new Promise((resolve) => {
-      _modelLoadingInProgress.resolves.push(resolve);
-    });
 
-    return await promise;
+  if (_modelLoadingInProgress.current) {
+    // Join the in-flight load rather than starting a second download.
+    return await new Promise((resolve, reject) => {
+      _modelLoadingInProgress.resolves.push(resolve);
+      _modelLoadingInProgress.rejects.push(reject);
+    });
   }
-  
+
   _modelLoadingInProgress.current = true;
 
   try {
-    this.model = await this.model;
-    useFullRangeModel(this.model);
-    this.modelLoaded = true;
+    let lastError;
+    for (let attempt = 1; attempt <= MODEL_LOAD_ATTEMPTS; attempt++) {
+      try {
+        this.model = await faceLandmarksDetection.createDetector(
+          faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+          _detectorConfig(this.refineLandmarks),
+        );
+        useFullRangeModel(this.model);
+        this.modelLoaded = true;
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        this.model = null;
+        if (attempt < MODEL_LOAD_ATTEMPTS) {
+          console.warn(
+            `[TFFaceMesh] Model load attempt ${attempt}/${MODEL_LOAD_ATTEMPTS} failed, retrying in ${MODEL_LOAD_RETRY_DELAY_MS}ms:`,
+            err?.message || err,
+          );
+          await _sleep(MODEL_LOAD_RETRY_DELAY_MS);
+        }
+      }
+    }
 
-    // resolve all promises that were added while the model was loading
-    _modelLoadingInProgress.resolves.forEach((resolve) => resolve());
+    if (lastError) {
+      console.error(
+        `[TFFaceMesh] Model load failed after ${MODEL_LOAD_ATTEMPTS} attempts.`,
+        'Check that the models/ folder is reachable from the page URL.',
+        lastError,
+      );
+      _modelLoadingInProgress.rejects.forEach(reject => reject(lastError));
+      throw lastError;
+    }
+
+    _modelLoadingInProgress.resolves.forEach(resolve => resolve());
   } finally {
     _modelLoadingInProgress.current = false;
     _modelLoadingInProgress.resolves = [];
+    _modelLoadingInProgress.rejects = [];
   }
-
-  return;
-}
+};
 
 // Global variable for face landmark positions array
 TFFaceMesh.prototype.positionsArray = null;

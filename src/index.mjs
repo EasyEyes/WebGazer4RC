@@ -109,6 +109,209 @@ const COMMON_CAMERA_RESOLUTIONS = [
 // Common frame rates to probe
 const COMMON_CAMERA_FRAMERATES = [5, 10, 15, 20, 24, 25, 30, 50, 60, 120];
 
+// When getCapabilities() is unavailable (Firefox) we fall back to live
+// applyConstraints probing. Each probe forces the OS to reconfigure the
+// capture device (150-400ms on macOS), so the sweep is bounded on three
+// axes: how many resolutions we try, how long a single probe may take,
+// and the total wall-clock budget. Whatever we found when a limit is hit
+// is good enough — the cost function already knows how to rank a partial
+// candidate set.
+const PROBE_MAX_RESOLUTIONS = 4;
+const PROBE_TIMEOUT_MS = 500;
+const PROBE_BUDGET_MS = 3000;
+
+// getUserMedia errors worth retrying. On macOS the capture device is not
+// always released synchronously, so a reopen shortly after a stop can
+// fail transiently with these even though the camera is perfectly fine.
+const TRANSIENT_GUM_ERRORS = new Set([
+  'NotReadableError',
+  'AbortError',
+  'TrackStartError',
+]);
+
+// Best mode per (device, desired mode). Reconnects and camera switches
+// re-request the same combination, and the answer cannot change while the
+// page is open, so probing/deriving it once is enough.
+const _cameraModeCache = new Map();
+
+const _cameraModeCacheKey = (deviceId, desiredX, desiredY, desiredHz) =>
+  `${deviceId || 'default'}|${desiredX}x${desiredY}@${desiredHz}`;
+
+/**
+ * Timings for the camera-startup path, in ms. Read by RemoteCalibrator so
+ * the duration to find the first camera can be saved with the results.
+ */
+webgazer.cameraTiming = {
+  firstStreamMs: null,
+  probeMs: null,
+  probeCount: null,
+  probeMethod: null,
+};
+
+const _rejectAfter = (ms, message) =>
+  new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms));
+
+const _withTimeout = (promise, ms, message) =>
+  Promise.race([promise, _rejectAfter(ms, message)]);
+
+/**
+ * getUserMedia with a hard timeout and a retry for transient device errors.
+ * Without the timeout a wedged capture device leaves the caller awaiting
+ * forever, which strands the whole calibration flow on its loading screen.
+ */
+async function getUserMediaResilient(constraints, {
+  timeoutMs = 15000,
+  attempts = 3,
+  retryDelayMs = 400,
+} = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await _withTimeout(
+        navigator.mediaDevices.getUserMedia(constraints),
+        timeoutMs,
+        `getUserMedia timed out after ${timeoutMs}ms`,
+      );
+    } catch (err) {
+      lastError = err;
+      const isTimeout = err instanceof Error && /timed out/.test(err.message);
+      const retryable = isTimeout || TRANSIENT_GUM_ERRORS.has(err?.name);
+      if (!retryable || attempt === attempts) throw err;
+      console.warn(
+        `[getUserMedia] ${err?.name || 'Error'} on attempt ${attempt}/${attempts}, retrying in ${retryDelayMs}ms:`,
+        err?.message || err,
+      );
+      await new Promise(r => setTimeout(r, retryDelayMs));
+    }
+  }
+  throw lastError;
+}
+
+webgazer.getUserMediaResilient = getUserMediaResilient;
+
+/**
+ * True when getCapabilities() returned usable width/height ranges. Chrome,
+ * Edge and Safari 17.4+ report them; Firefox returns an empty object.
+ */
+function _capabilitiesAreUsable(capabilities) {
+  return !!(
+    capabilities &&
+    capabilities.width &&
+    capabilities.height &&
+    Number.isFinite(capabilities.width.max) &&
+    Number.isFinite(capabilities.height.max)
+  );
+}
+
+/**
+ * Rank every candidate mode against the desired one using `cameraCost` and
+ * return the winner, without touching the camera.
+ *
+ * A browser that reports capabilities tells us the supported width, height
+ * and frame-rate ranges up front, and it will scale or crop to satisfy any
+ * size inside those ranges. That makes live probing pure overhead: the same
+ * cost function applied to the capability ranges picks the same mode in
+ * microseconds instead of ~30 seconds.
+ *
+ * Out-of-range resolutions are still scored (with the unavailability tax)
+ * so a camera that cannot reach the desired size at all still resolves to
+ * the closest thing it can do.
+ */
+function _rankModes(capabilities, desiredX, desiredY, desiredHz, resolutions) {
+  const wMin = capabilities?.width?.min ?? 0;
+  const wMax = capabilities?.width?.max ?? Infinity;
+  const hMin = capabilities?.height?.min ?? 0;
+  const hMax = capabilities?.height?.max ?? Infinity;
+  const frMin = capabilities?.frameRate?.min ?? 0;
+  const frMax = capabilities?.frameRate?.max ?? Infinity;
+
+  const frCandidates = [...new Set([...COMMON_CAMERA_FRAMERATES, desiredHz])]
+    .filter(fr => fr >= frMin && fr <= frMax)
+    .sort((a, b) => a - b);
+  // Every rate we know about is outside the camera's range, so the best it
+  // can do is the end of its own range nearest the desired rate.
+  if (frCandidates.length === 0) {
+    frCandidates.push(Math.min(Math.max(desiredHz, frMin), frMax));
+  }
+
+  const modes = [];
+  for (const [w, h] of resolutions) {
+    const available = w >= wMin && w <= wMax && h >= hMin && h <= hMax;
+    if (available) {
+      for (const fr of frCandidates) {
+        modes.push({ width: w, height: h, frameRate: fr, available: true });
+      }
+    } else {
+      modes.push({ width: w, height: h, frameRate: desiredHz, available: false });
+    }
+  }
+
+  let bestMode = null;
+  let bestCost = Infinity;
+  for (const mode of modes) {
+    const cost = cameraCost(
+      mode.width, mode.height, mode.frameRate,
+      desiredX, desiredY, desiredHz,
+      mode.available,
+    );
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMode = mode;
+    }
+  }
+  return { bestMode, bestCost, modeCount: modes.length };
+}
+
+/**
+ * Candidate resolutions: the common list plus the desired size, deduped.
+ */
+function _resolutionCandidates(desiredX, desiredY) {
+  const seen = new Set();
+  const out = [];
+  for (const [w, h] of [...COMMON_CAMERA_RESOLUTIONS, [desiredX, desiredY]]) {
+    const key = `${w}x${h}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push([w, h]);
+  }
+  return out;
+}
+
+/**
+ * Apply a chosen mode to a live track, preferring exact sizing but falling
+ * back to `ideal` so an unexpected rejection cannot leave the caller
+ * without a usable stream.
+ */
+async function _applyMode(track, mode) {
+  try {
+    await track.applyConstraints({
+      width: { exact: mode.width },
+      height: { exact: mode.height },
+      frameRate: { ideal: mode.frameRate },
+    });
+    return true;
+  } catch (e) {
+    console.warn(
+      `[findBestCameraMode] Exact ${mode.width}x${mode.height} rejected, retrying as ideal:`,
+      e?.message || e,
+    );
+    try {
+      await track.applyConstraints({
+        width: { ideal: mode.width },
+        height: { ideal: mode.height },
+        frameRate: { ideal: mode.frameRate },
+      });
+      return true;
+    } catch (e2) {
+      console.warn(
+        '[findBestCameraMode] Could not apply best mode, keeping current settings:',
+        e2?.message || e2,
+      );
+      return false;
+    }
+  }
+}
+
 /**
  * Cost function for evaluating how close a camera mode is to the desired settings.
  * Lower cost is better. Unavailable modes receive a heavy penalty of 100.
@@ -136,26 +339,95 @@ function cameraCost(tryX, tryY, tryHz, desiredX, desiredY, desiredHz, available)
 }
 
 /**
- * Discover available camera modes and find the best match for desired settings.
- * Uses applyConstraints probing on an existing track to efficiently discover
- * discrete resolution and frame rate modes supported by the camera.
- *
- * @param {string|null} deviceId - Camera device ID (null for default camera)
- * @param {number} desiredX - Desired width
- * @param {number} desiredY - Desired height
- * @param {number} desiredHz - Desired frame rate
- * @returns {Promise<{stream: MediaStream, width: number, height: number, frameRate: number}>}
+ * Bounded applyConstraints probing, for browsers that do not report
+ * capabilities (Firefox). Only the resolutions closest to the desired one
+ * are tried, frame rate is requested once as `ideal` rather than swept,
+ * and the loop abandons ship when it runs out of time.
  */
+async function _probeModes(track, desiredX, desiredY, desiredHz, resolutions) {
+  const ranked = resolutions
+    .map(([w, h]) => ({
+      width: w,
+      height: h,
+      cost: cameraCost(w, h, desiredHz, desiredX, desiredY, desiredHz, true),
+    }))
+    .sort((a, b) => a.cost - b.cost)
+    .slice(0, PROBE_MAX_RESOLUTIONS);
+
+  const modes = [];
+  const deadline = performance.now() + PROBE_BUDGET_MS;
+  let probeCount = 0;
+
+  for (const candidate of ranked) {
+    if (performance.now() > deadline) {
+      console.warn('[findBestCameraMode] Probe budget exhausted, using candidates found so far');
+      break;
+    }
+    probeCount++;
+    try {
+      await _withTimeout(
+        track.applyConstraints({
+          width: { exact: candidate.width },
+          height: { exact: candidate.height },
+          frameRate: { ideal: desiredHz },
+        }),
+        PROBE_TIMEOUT_MS,
+        'applyConstraints timed out',
+      );
+      const settings = track.getSettings();
+      modes.push({
+        width: settings.width || candidate.width,
+        height: settings.height || candidate.height,
+        frameRate: settings.frameRate || desiredHz,
+        available: true,
+      });
+    } catch (e) {
+      modes.push({
+        width: candidate.width,
+        height: candidate.height,
+        frameRate: desiredHz,
+        available: false,
+      });
+    }
+  }
+
+  let bestMode = null;
+  let bestCost = Infinity;
+  for (const mode of modes) {
+    const cost = cameraCost(
+      mode.width, mode.height, mode.frameRate,
+      desiredX, desiredY, desiredHz,
+      mode.available,
+    );
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMode = mode;
+    }
+  }
+  return { bestMode, bestCost, probeCount };
+}
+
 async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
   console.log(`[findBestCameraMode] Searching for best match: ${desiredX}x${desiredY} @ ${desiredHz}Hz`);
   const startTime = performance.now();
 
-  // 1. Open a basic stream for probing
-  const videoConstraints = deviceId
-    ? { deviceId: typeof deviceId === 'object' ? deviceId : { exact: deviceId } }
+  // 1. Open the stream already asking for the desired mode, so a camera
+  //    that supports it natively is configured correctly from the start and
+  //    the applyConstraints below becomes a no-op.
+  const rawDeviceId = typeof deviceId === 'object' ? deviceId?.exact : deviceId;
+  const videoConstraints = rawDeviceId
+    ? { deviceId: { exact: rawDeviceId } }
     : { facingMode: 'user' };
-  const tempStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+  const tempStream = await getUserMediaResilient({
+    video: {
+      ...videoConstraints,
+      width: { ideal: desiredX },
+      height: { ideal: desiredY },
+      frameRate: { ideal: desiredHz },
+    },
+  });
   const track = tempStream.getVideoTracks()[0];
+  const firstStreamMs = performance.now() - startTime;
 
   // 2. Get capabilities if the browser supports it (Chrome, Edge, Safari 17.4+)
   const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : null;
@@ -166,130 +438,67 @@ async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
       `frameRate ${capabilities.frameRate?.min}-${capabilities.frameRate?.max}`);
   }
 
-  // 3. Build candidate resolution list (common + desired, filtered by capabilities)
-  const resCandidates = [...COMMON_CAMERA_RESOLUTIONS, [desiredX, desiredY]];
-  const seenRes = new Set();
-  const uniqueResCandidates = [];
-  for (const [w, h] of resCandidates) {
-    const key = `${w}x${h}`;
-    if (seenRes.has(key)) continue;
-    seenRes.add(key);
-    if (capabilities && capabilities.width && capabilities.height) {
-      const wMin = capabilities.width.min || 0;
-      const wMax = capabilities.width.max || Infinity;
-      const hMin = capabilities.height.min || 0;
-      const hMax = capabilities.height.max || Infinity;
-      if (w < wMin || w > wMax || h < hMin || h > hMax) continue;
-    }
-    uniqueResCandidates.push([w, h]);
+  const cacheKey = _cameraModeCacheKey(rawDeviceId, desiredX, desiredY, desiredHz);
+  const resolutions = _resolutionCandidates(desiredX, desiredY);
+
+  let bestMode;
+  let bestCost;
+  let probeCount = 0;
+  let probeMethod;
+
+  const cached = _cameraModeCache.get(cacheKey);
+  if (cached) {
+    bestMode = { ...cached, available: true };
+    bestCost = 0;
+    probeMethod = 'cache';
+    console.log(`[findBestCameraMode] Reusing cached mode ${cached.width}x${cached.height} @ ${cached.frameRate}Hz`);
+  } else if (_capabilitiesAreUsable(capabilities)) {
+    const ranked = _rankModes(capabilities, desiredX, desiredY, desiredHz, resolutions);
+    bestMode = ranked.bestMode;
+    bestCost = ranked.bestCost;
+    probeMethod = 'capabilities';
+    console.log(`[findBestCameraMode] Ranked ${ranked.modeCount} candidate mode(s) from capabilities (no probing needed)`);
+  } else {
+    console.log('[findBestCameraMode] Capabilities unavailable, falling back to bounded probing');
+    const probed = await _probeModes(track, desiredX, desiredY, desiredHz, resolutions);
+    bestMode = probed.bestMode;
+    bestCost = probed.bestCost;
+    probeCount = probed.probeCount;
+    probeMethod = 'probe';
   }
 
-  // 4. Probe resolutions using exact constraints
-  const availableResolutions = new Map();
-  const unavailableResolutions = [];
-  for (const [w, h] of uniqueResCandidates) {
-    try {
-      await track.applyConstraints({ width: { exact: w }, height: { exact: h } });
-      const settings = track.getSettings();
-      const key = `${settings.width}x${settings.height}`;
-      if (!availableResolutions.has(key)) {
-        availableResolutions.set(key, { width: settings.width, height: settings.height });
-      }
-    } catch (e) {
-      unavailableResolutions.push({ width: w, height: h });
-    }
-  }
-  console.log(`[findBestCameraMode] Discovered ${availableResolutions.size} available resolution(s)`);
-
-  // 5. Build frame rate candidate list (common + desired, filtered by capabilities)
-  const frCandidates = [...new Set([...COMMON_CAMERA_FRAMERATES, desiredHz])].sort((a, b) => a - b);
-  const filteredFrCandidates = (capabilities && capabilities.frameRate)
-    ? frCandidates.filter(fr => fr >= (capabilities.frameRate.min || 0) && fr <= (capabilities.frameRate.max || Infinity))
-    : frCandidates;
-
-  // 6. Probe frame rates for each available resolution
-  //    Use "ideal" for frameRate so the browser snaps to the nearest supported value.
-  //    Reading back getSettings() reveals the actual discrete frame rate.
-  const allModes = [];
-  for (const [, res] of availableResolutions) {
-    const discoveredFRs = new Set();
-    for (const fr of filteredFrCandidates) {
-      try {
-        await track.applyConstraints({
-          width: { exact: res.width },
-          height: { exact: res.height },
-          frameRate: { ideal: fr }
-        });
-        const settings = track.getSettings();
-        const actualFR = settings.frameRate;
-        const frKey = actualFR.toFixed(2);
-        if (!discoveredFRs.has(frKey)) {
-          discoveredFRs.add(frKey);
-          allModes.push({
-            width: res.width, height: res.height,
-            frameRate: actualFR, available: true
-          });
-        }
-      } catch (e) {
-        // Shouldn't happen with ideal frameRate, but handle gracefully
-      }
-    }
-    if (discoveredFRs.size === 0) {
-      const settings = track.getSettings();
-      allModes.push({
-        width: res.width, height: res.height,
-        frameRate: settings.frameRate || desiredHz, available: true
-      });
-    }
+  if (bestMode) {
+    console.log(`[findBestCameraMode] Best: ${bestMode.width}x${bestMode.height} @ ${bestMode.frameRate}Hz (cost: ${bestCost.toFixed(4)})`);
   }
 
-  // 7. Include unavailable resolutions so the cost function can compare them
-  for (const res of unavailableResolutions) {
-    allModes.push({
-      width: res.width, height: res.height,
-      frameRate: desiredHz, available: false
-    });
-  }
-
-  // 8. Compute cost for every mode, pick the lowest
-  let bestMode = null;
-  let bestCost = Infinity;
-  for (const mode of allModes) {
-    const cost = cameraCost(
-      mode.width, mode.height, mode.frameRate,
-      desiredX, desiredY, desiredHz,
-      mode.available
-    );
-    if (cost < bestCost) {
-      bestCost = cost;
-      bestMode = mode;
-    }
-  }
-
-  // Log all discovered modes for debugging
-  console.log(`[findBestCameraMode] All discovered modes:`);
-  for (const mode of allModes) {
-    const cost = cameraCost(mode.width, mode.height, mode.frameRate, desiredX, desiredY, desiredHz, mode.available);
-    console.log(`  ${mode.width}x${mode.height} @ ${mode.frameRate.toFixed(1)}Hz — cost: ${cost.toFixed(4)} ${mode.available ? '✓' : '✗ unavailable'}`);
-  }
-  console.log(`[findBestCameraMode] Best: ${bestMode?.width}x${bestMode?.height} @ ${bestMode?.frameRate.toFixed(1)}Hz (cost: ${bestCost.toFixed(4)})`);
-
-  // 9. Apply the best mode to the track
-  if (bestMode && bestMode.available) {
-    try {
-      await track.applyConstraints({
-        width: { exact: bestMode.width },
-        height: { exact: bestMode.height },
-        frameRate: { ideal: bestMode.frameRate }
-      });
-    } catch (e) {
-      console.warn('[findBestCameraMode] Failed to apply best mode, using current settings');
-    }
+  // 3. Apply the winning mode, unless the stream already landed on it.
+  const current = track.getSettings();
+  const alreadyThere =
+    bestMode &&
+    current.width === bestMode.width &&
+    current.height === bestMode.height &&
+    Math.round(current.frameRate || 0) === Math.round(bestMode.frameRate);
+  if (bestMode && bestMode.available && !alreadyThere) {
+    await _applyMode(track, bestMode);
+  } else if (alreadyThere) {
+    console.log('[findBestCameraMode] Stream already at the best mode, skipping applyConstraints');
   }
 
   const finalSettings = track.getSettings();
   const elapsed = performance.now() - startTime;
-  console.log(`[findBestCameraMode] Final: ${finalSettings.width}x${finalSettings.height} @ ${finalSettings.frameRate}Hz (probing took ${elapsed.toFixed(0)}ms)`);
+  _cameraModeCache.set(cacheKey, {
+    width: finalSettings.width,
+    height: finalSettings.height,
+    frameRate: finalSettings.frameRate,
+  });
+  webgazer.cameraTiming = {
+    ...webgazer.cameraTiming,
+    firstStreamMs: Math.round(firstStreamMs),
+    probeMs: Math.round(elapsed),
+    probeCount,
+    probeMethod,
+  };
+  console.log(`[findBestCameraMode] Final: ${finalSettings.width}x${finalSettings.height} @ ${finalSettings.frameRate}Hz (via ${probeMethod}, ${probeCount} probe(s), took ${elapsed.toFixed(0)}ms)`);
 
   const capMaxWidth = capabilities?.width?.max || finalSettings.width;
   const capMaxHeight = capabilities?.height?.max || finalSettings.height;
@@ -1088,7 +1297,7 @@ webgazer.begin = function (onFail) {
  * Start the video element.
  */
 webgazer.beginVideo = function (onFail) {
-  webgazer._begin(true, onFail);
+  return webgazer._begin(true, onFail);
 };
 
 /* ------------------------------ Video switch ------------------------------ */
@@ -1189,23 +1398,33 @@ webgazer._begin = function (videoOnly, onVideoFail) {
 
     return new Promise(async (resolve, reject) => {
       let stream;
+      // `onVideoFail` shows a blocking error dialog, so it must fire at most
+      // once per attempt no matter which layer catches the failure.
+      let videoFailReported = false;
+      const reportVideoFail = inputs => {
+        if (videoFailReported) return;
+        videoFailReported = true;
+        onVideoFail(inputs);
+      };
 
       try {
         if (
           typeof navigator.mediaDevices !== "undefined" &&
           typeof navigator.mediaDevices.enumerateDevices === "function"
         ) {
+          const enumerateStart = performance.now();
           const availableDevices =
             await navigator.mediaDevices.enumerateDevices();
+          webgazer.cameraTiming = {
+            ...webgazer.cameraTiming,
+            enumerateMs: Math.round(performance.now() - enumerateStart),
+          };
           // pick the default source
           _gotSources(availableDevices);
           // no valid video input devices
           if (videoInputs.length === 0) {
-            onVideoFail(videoInputs);
-            throw JSON.stringify({
-              message: "We can't find any video input devices.",
-              devices: availableDevices,
-            });
+            reportVideoFail(videoInputs);
+            throw new Error("We can't find any video input devices.");
           }
 
           // await navigator.mediaDevices.getUserMedia({
@@ -1235,42 +1454,23 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               };
               console.log(`Camera resolution (probed): ${result.width}x${result.height} @ ${result.frameRate}Hz, capability max: ${result.capMaxWidth}x${result.capMaxHeight}`);
             } else {
-              // Original progressive fallback (no desired resolution specified)
-              // Try min: 1920x1080 first, fallback to 1280x720, then ideal-only
-              try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                  video: {
-                    width: { min: 1920, ideal: 7680 },
-                    height: { min: 1080, ideal: 4320 },
-                    aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                    facingMode: "user"
-                  }
-                });
-                console.log("✅ Got stream with min 1920x1080");
-              } catch (fullHDError) {
-                console.warn("Camera doesn't support 1920x1080 min, trying 1280x720");
-                try {
-                  stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                      width: { min: 1280, ideal: 7680 },
-                      height: { min: 720, ideal: 4320 },
-                      aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                      facingMode: "user"
-                    }
-                  });
-                  console.log("✅ Got stream with min 1280x720");
-                } catch (hdError) {
-                  console.warn("Camera doesn't support 1280x720 min, using ideal-only");
-                  stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                      width: { ideal: 1920 },
-                      height: { ideal: 1080 },
-                      aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                      facingMode: "user"
-                    }
-                  });
+              // No desired resolution specified
+              const gumStart = performance.now();
+              stream = await getUserMediaResilient({
+                video: {
+                  width: { ideal: 1920 },
+                  height: { ideal: 1080 },
+                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+                  facingMode: "user"
                 }
-              }
+              });
+              webgazer.cameraTiming = {
+                ...webgazer.cameraTiming,
+                firstStreamMs: Math.round(performance.now() - gumStart),
+                probeMs: 0,
+                probeCount: 0,
+                probeMethod: 'none',
+              };
 
               const videoTrack = stream.getVideoTracks()[0];
               const settings = videoTrack.getSettings();
@@ -1294,37 +1494,41 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               };
             }
           } catch (error) {
-            onVideoFail(videoInputs);
+            reportVideoFail(videoInputs);
             throw error;
           }
 
-          init(videoOnly ? "video" : "all", stream).then(() => {
-            // if (videoInputs.length > 1) _setUpActiveCameraSwitch(videoInputs);
-          });
+          // The video container and canvases are created here. Callers wait
+          // for that DOM to exist, so a failure must reject rather than be
+          // swallowed -- otherwise they wait forever.
+          await init(videoOnly ? "video" : "all", stream);
           ////
           webgazer.params.videoIsOn = true;
           ////
-          if (!videoOnly) resolve(webgazer);
+          resolve(webgazer);
         } else {
-          onVideoFail([]);
+          reportVideoFail([]);
+          throw new Error("navigator.mediaDevices is unavailable.");
         }
       } catch (err) {
         videoElement = null;
         stream = null;
 
-        onVideoFail([]);
+        reportVideoFail([]);
+
+        // Log the error itself: JSON.stringify() turns a DOMException into
+        // "{}", which is what made past camera failures unreadable.
+        console.error('[webgazer._begin] Failed to start video:', err);
 
         reject(err);
-        throw JSON.stringify({
-          error: err,
-          devices: await navigator.mediaDevices.enumerateDevices(),
-        });
       }
     });
   } else {
     // Video is ON
-    // e.g. tracking viewing distance already
-    init("gaze");
+    // e.g. tracking viewing distance already.
+    // Returned so the caller can await it -- init() loads the face model,
+    // and an unhandled rejection from that download aborts the experiment.
+    return init("gaze");
   }
 };
 
@@ -1707,16 +1911,21 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
     if (liveMonitor) liveMonitor.pause();
     console.log('[CameraReconnect] setCameraConstraints START — _isSwappingCamera = true, monitor paused');
     webgazer.pause();
+    const previousStream = videoStream;
     try {
-      // Stop old stream
-      videoStream.getVideoTracks().forEach(t => t.stop());
+      // The old stream is released only once the new one is live (see the
+      // end of this block). Stopping first leaves the participant with a
+      // dead <video> if acquiring the replacement fails, and on macOS it
+      // can also make the immediate reopen fail while the OS is still
+      // tearing the capture device down.
 
       let stream;
       const desiredRes = webgazer.params.desiredCameraResolution;
       const desiredHz = webgazer.params.desiredCameraHz;
 
       if (desiredRes && desiredHz) {
-        // Use cost-function-based probing to find best mode for this device
+        // Pick the closest available mode for this device (cached per device,
+        // so switching back to a camera seen earlier costs nothing).
         const rawDeviceId = deviceId?.exact || deviceId;
         console.log(`setCameraConstraints: using findBestCameraMode for ${desiredRes[0]}x${desiredRes[1]} @ ${desiredHz}Hz`);
         const result = await findBestCameraMode(rawDeviceId, desiredRes[0], desiredRes[1], desiredHz);
@@ -1738,64 +1947,22 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
           maxFrameRate: result.capMaxFrameRate
         };
       } else {
-        // Original behavior: use known resolution or progressive fallback
-        if (knownResolution && knownResolution.width >= 1920) {
-          console.log(`Using known resolution: ${knownResolution.width}x${knownResolution.height}`);
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              deviceId: deviceId,
-              width: { min: 1920, ideal: knownResolution.width },
-              height: { min: 1080, ideal: knownResolution.height },
-              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-              facingMode: "user"
-            }
-          });
-        } else if (knownResolution && knownResolution.width >= 1280) {
-          console.log(`Using known resolution (720p+): ${knownResolution.width}x${knownResolution.height}`);
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              deviceId: deviceId,
-              width: { min: 1280, ideal: knownResolution.width },
-              height: { min: 720, ideal: knownResolution.height },
-              aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-              facingMode: "user"
-            }
-          });
-        } else {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: {
-                deviceId: deviceId,
-                width: { min: 1920, ideal: 7680 },
-                height: { min: 1080, ideal: 4320 },
-                aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                facingMode: "user"
-              }
-            });
-          } catch (fullHDError) {
-            try {
-              stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  deviceId: deviceId,
-                  width: { min: 1280, ideal: 7680 },
-                  height: { min: 720, ideal: 4320 },
-                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                  facingMode: "user"
-                }
-              });
-            } catch (hdError) {
-              stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                  deviceId: deviceId,
-                  width: { ideal: 1920 },
-                  height: { ideal: 1080 },
-                  aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
-                  facingMode: "user"
-                }
-              });
-            }
+        // No desired mode configured: request the known resolution if we
+        // have one, else the highest the camera offers. Expressed as `ideal`
+        // so an unsatisfiable value degrades gracefully instead of throwing
+        // and forcing a retry ladder.
+        const idealWidth = knownResolution?.width || 1920;
+        const idealHeight = knownResolution?.height || 1080;
+        console.log(`setCameraConstraints: requesting ideal ${idealWidth}x${idealHeight}`);
+        stream = await getUserMediaResilient({
+          video: {
+            deviceId: deviceId,
+            width: { ideal: idealWidth },
+            height: { ideal: idealHeight },
+            aspectRatio: { min: 1.33, ideal: 1.78, max: 2.33 },
+            facingMode: "user"
           }
-        }
+        });
 
         const videoTrack = stream.getVideoTracks()[0];
         const settings = videoTrack.getSettings();
@@ -1822,9 +1989,21 @@ webgazer.setCameraConstraints = async function (constraints, knownResolution = n
         };
       }
 
+      // New stream is attached and monitored, so the old one can go.
+      if (previousStream && previousStream !== videoStream) {
+        previousStream.getVideoTracks().forEach(t => t.stop());
+      }
     } catch (err) {
       console.error('[CameraReconnect] setCameraConstraints ERROR:', err);
+      // Leave the participant looking at the previous camera rather than a
+      // dead <video> element.
+      if (previousStream && previousStream.active) {
+        videoStream = previousStream;
+        if (videoElement) videoElement.srcObject = previousStream;
+        startOrUpdateLiveMonitor(previousStream);
+      }
       _isSwappingCamera = false;
+      await webgazer.resume();
       return;
     }
     console.log('[CameraReconnect] setCameraConstraints END — _isSwappingCamera = false');
@@ -1846,14 +2025,20 @@ webgazer.setCameraConstraintsDirect = async function (constraints, width, height
     if (liveMonitor) liveMonitor.pause();
     console.log('[CameraReconnect] setCameraConstraintsDirect START — _isSwappingCamera = true, monitor paused');
     webgazer.pause();
+    const previousStream = videoStream;
     try {
-      videoStream.getVideoTracks().forEach(t => t.stop());
-
       const rawDeviceId = deviceId?.exact || deviceId;
       const videoConstraints = rawDeviceId
         ? { deviceId: { exact: rawDeviceId } }
         : { facingMode: 'user' };
-      const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      const stream = await getUserMediaResilient({
+        video: {
+          ...videoConstraints,
+          width: { ideal: width },
+          height: { ideal: height },
+          frameRate: { ideal: frameRate },
+        },
+      });
       const track = stream.getVideoTracks()[0];
 
       await track.applyConstraints({
@@ -1882,8 +2067,18 @@ webgazer.setCameraConstraintsDirect = async function (constraints, width, height
         frameRate: actualFR,
         maxFrameRate: cap?.frameRate?.max || actualFR
       };
+
+      if (previousStream && previousStream !== stream) {
+        previousStream.getVideoTracks().forEach(t => t.stop());
+      }
     } catch (err) {
       console.error('[CameraReconnect] setCameraConstraintsDirect ERROR:', err);
+      // The caller falls back to setCameraConstraints, so keep the previous
+      // stream alive and attached until that succeeds.
+      if (previousStream && previousStream.active) {
+        videoStream = previousStream;
+        if (videoElement) videoElement.srcObject = previousStream;
+      }
       _isSwappingCamera = false;
       throw err;
     }
