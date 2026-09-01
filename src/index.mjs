@@ -129,6 +129,50 @@ const TRANSIENT_GUM_ERRORS = new Set([
   'TrackStartError',
 ]);
 
+const _startupAborted = () => !!webgazer._startupAbort?.aborted;
+
+const _startupAbortError = () => {
+  const err = new Error('Camera startup aborted');
+  err.name = 'AbortError';
+  err.startupAbort = true;
+  return err;
+};
+
+const _throwIfStartupAborted = () => {
+  if (_startupAborted()) throw _startupAbortError();
+};
+
+const _stopStream = stream => {
+  try {
+    stream?.getTracks?.().forEach(track => track.stop());
+  } catch (_) {
+    /* already stopped */
+  }
+};
+
+const _discardIncompleteVideoDom = () => {
+  if (webgazer.params.videoIsOn) return;
+  try {
+    videoContainerElement?.remove();
+  } catch (_) {
+    /* not in DOM */
+  }
+  videoContainerElement = null;
+  videoElement = null;
+  videoElementCanvas = null;
+  faceOverlay = null;
+  faceFeedbackBox = null;
+  videoStream = null;
+  if (liveMonitor) {
+    try {
+      liveMonitor.stop();
+    } catch (_) {
+      /* ignore */
+    }
+    liveMonitor = null;
+  }
+};
+
 // Best mode per (device, desired mode). Reconnects and camera switches
 // re-request the same combination, and the answer cannot change while the
 // page is open, so probing/deriving it once is enough.
@@ -166,14 +210,21 @@ async function getUserMediaResilient(constraints, {
 } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
+    _throwIfStartupAborted();
     try {
-      return await _withTimeout(
+      const stream = await _withTimeout(
         navigator.mediaDevices.getUserMedia(constraints),
         timeoutMs,
         `getUserMedia timed out after ${timeoutMs}ms`,
       );
+      if (_startupAborted()) {
+        _stopStream(stream);
+        throw _startupAbortError();
+      }
+      return stream;
     } catch (err) {
       lastError = err;
+      if (err?.startupAbort) throw err;
       const isTimeout = err instanceof Error && /timed out/.test(err.message);
       const retryable = isTimeout || TRANSIENT_GUM_ERRORS.has(err?.name);
       if (!retryable || attempt === attempts) throw err;
@@ -182,6 +233,7 @@ async function getUserMediaResilient(constraints, {
         err?.message || err,
       );
       await new Promise(r => setTimeout(r, retryDelayMs));
+      _throwIfStartupAborted();
     }
   }
   throw lastError;
@@ -426,6 +478,8 @@ async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
       frameRate: { ideal: desiredHz },
     },
   });
+  try {
+    _throwIfStartupAborted();
   const track = tempStream.getVideoTracks()[0];
   const firstStreamMs = performance.now() - startTime;
 
@@ -478,19 +532,31 @@ async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
     current.width === bestMode.width &&
     current.height === bestMode.height &&
     Math.round(current.frameRate || 0) === Math.round(bestMode.frameRate);
-  if (bestMode && bestMode.available && !alreadyThere) {
-    await _applyMode(track, bestMode);
-  } else if (alreadyThere) {
+  let modeApplied = false;
+  if (alreadyThere) {
+    modeApplied = true;
     console.log('[findBestCameraMode] Stream already at the best mode, skipping applyConstraints');
+  } else if (bestMode && bestMode.available) {
+    modeApplied = await _applyMode(track, bestMode);
   }
 
   const finalSettings = track.getSettings();
   const elapsed = performance.now() - startTime;
-  _cameraModeCache.set(cacheKey, {
-    width: finalSettings.width,
-    height: finalSettings.height,
-    frameRate: finalSettings.frameRate,
-  });
+  // Only cache a mode that was actually negotiated successfully. Caching
+  // whatever the track happened to land on after a failed apply (e.g.
+  // another app briefly holding the camera) would pin that degraded mode
+  // for every later reconnect/switch until page reload.
+  if (modeApplied) {
+    _cameraModeCache.set(cacheKey, {
+      width: finalSettings.width,
+      height: finalSettings.height,
+      frameRate: finalSettings.frameRate,
+    });
+  } else if (probeMethod === 'cache') {
+    // The cached mode no longer applies; drop it so the next attempt
+    // re-ranks from capabilities instead of retrying a stale answer.
+    _cameraModeCache.delete(cacheKey);
+  }
   webgazer.cameraTiming = {
     ...webgazer.cameraTiming,
     firstStreamMs: Math.round(firstStreamMs),
@@ -513,6 +579,10 @@ async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
     capMaxHeight,
     capMaxFrameRate
   };
+  } catch (err) {
+    if (err?.startupAbort || _startupAborted()) _stopStream(tempStream);
+    throw err;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1228,6 +1298,7 @@ async function init(initMode = "all", stream) {
 
   // load the distance model
   await curTracker.loadModel();
+  _throwIfStartupAborted();
   await loop();
 }
 
@@ -1273,7 +1344,7 @@ function setUserMediaVariable() {
  * @param {Function} onFail - Callback to call in case it is impossible to find user camera
  * @returns {*}
  */
-webgazer.begin = function (onFail) {
+webgazer.begin = function (onFail, signal) {
   // if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.chrome){
   //   alert("WebGazer works only over https. If you are doing local development, you need to run a local server.");
   // }
@@ -1290,14 +1361,14 @@ webgazer.begin = function (onFail) {
   //   return webgazer;
   // }
 
-  return webgazer._begin(false, onFail);
+  return webgazer._begin(false, onFail, signal);
 };
 
 /**
  * Start the video element.
  */
-webgazer.beginVideo = function (onFail) {
-  return webgazer._begin(true, onFail);
+webgazer.beginVideo = function (onFail, signal) {
+  return webgazer._begin(true, onFail, signal);
 };
 
 /* ------------------------------ Video switch ------------------------------ */
@@ -1390,7 +1461,9 @@ const _setUpConstraints = (originalConstraints) => {
   };
 };
 
-webgazer._begin = function (videoOnly, onVideoFail) {
+webgazer._begin = function (videoOnly, onVideoFail, signal) {
+  if (signal) webgazer._startupAbort = signal;
+
   // SETUP VIDEO ELEMENTS
   // Sets .mediaDevices.getUserMedia depending on browser
   if (!webgazer.params.videoIsOn) {
@@ -1404,10 +1477,11 @@ webgazer._begin = function (videoOnly, onVideoFail) {
       const reportVideoFail = inputs => {
         if (videoFailReported) return;
         videoFailReported = true;
-        onVideoFail(inputs);
+        if (typeof onVideoFail === 'function') onVideoFail(inputs);
       };
 
       try {
+        _throwIfStartupAborted();
         if (
           typeof navigator.mediaDevices !== "undefined" &&
           typeof navigator.mediaDevices.enumerateDevices === "function"
@@ -1415,6 +1489,7 @@ webgazer._begin = function (videoOnly, onVideoFail) {
           const enumerateStart = performance.now();
           const availableDevices =
             await navigator.mediaDevices.enumerateDevices();
+          _throwIfStartupAborted();
           webgazer.cameraTiming = {
             ...webgazer.cameraTiming,
             enumerateMs: Math.round(performance.now() - enumerateStart),
@@ -1443,6 +1518,7 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               console.log(`Using findBestCameraMode: desired ${desiredRes[0]}x${desiredRes[1]} @ ${desiredHz}Hz`);
               const result = await findBestCameraMode(null, desiredRes[0], desiredRes[1], desiredHz);
               stream = result.stream;
+              _throwIfStartupAborted();
 
               webgazer.videoParamsToReport = {
                 height: result.height,
@@ -1464,6 +1540,7 @@ webgazer._begin = function (videoOnly, onVideoFail) {
                   facingMode: "user"
                 }
               });
+              _throwIfStartupAborted();
               webgazer.cameraTiming = {
                 ...webgazer.cameraTiming,
                 firstStreamMs: Math.round(performance.now() - gumStart),
@@ -1494,14 +1571,14 @@ webgazer._begin = function (videoOnly, onVideoFail) {
               };
             }
           } catch (error) {
-            reportVideoFail(videoInputs);
+            if (!error?.startupAbort) reportVideoFail(videoInputs);
             throw error;
           }
 
-          // The video container and canvases are created here. Callers wait
-          // for that DOM to exist, so a failure must reject rather than be
-          // swallowed -- otherwise they wait forever.
+          // When this promise resolves, the video container is in the DOM —
+          // callers no longer poll for it.
           await init(videoOnly ? "video" : "all", stream);
+          _throwIfStartupAborted();
           ////
           webgazer.params.videoIsOn = true;
           ////
@@ -1511,10 +1588,13 @@ webgazer._begin = function (videoOnly, onVideoFail) {
           throw new Error("navigator.mediaDevices is unavailable.");
         }
       } catch (err) {
-        videoElement = null;
-        stream = null;
+        _stopStream(stream);
+        _discardIncompleteVideoDom();
 
-        reportVideoFail([]);
+        // Pass the real device list: with cameras present the dialog says
+        // "camera use denied" instead of the misleading "no camera" that an
+        // empty array produces (e.g. on a model-download or network error).
+        if (!err?.startupAbort) reportVideoFail(videoInputs);
 
         // Log the error itself: JSON.stringify() turns a DOMException into
         // "{}", which is what made past camera failures unreadable.
