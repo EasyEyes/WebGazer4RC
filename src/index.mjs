@@ -459,7 +459,8 @@ async function _probeModes(track, desiredX, desiredY, desiredHz, resolutions) {
   return { bestMode, bestCost, probeCount };
 }
 
-async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
+// Exported for RC's bounded-probing regression tests; additive only.
+export async function findBestCameraMode(deviceId, desiredX, desiredY, desiredHz) {
   console.log(`[findBestCameraMode] Searching for best match: ${desiredX}x${desiredY} @ ${desiredHz}Hz`);
   const startTime = performance.now();
 
@@ -658,15 +659,56 @@ function startOrUpdateLiveMonitor(stream) {
   }
   liveMonitor = new VideoLiveMonitor(stream, videoElement);
   liveMonitor.onChange((snap) => {
-    console.log('[CameraReconnect] onChange callback fired, status:', snap.status, '_isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera);
+    console.log('[CameraReconnect] onChange callback fired, status:', snap.status, '_isReconnecting:', _isReconnecting, '_isSwappingCamera:', _isSwappingCamera, '_suspended:', liveMonitor._suspended);
     if ((snap.status === 'ended' || snap.status === 'inactive') && !_isReconnecting && !_isSwappingCamera) {
       console.error('[CameraReconnect] >>> TRIGGERING DISCONNECT POPUP <<<', snap);
       showCameraReconnectionPopup(
-        `Camera status: ${snap.status} (track: ${snap.trackReadyState}, stream active: ${snap.streamActive})`
+        `Camera status: ${snap.status} (track: ${snap.trackReadyState}, stream active: ${snap.streamActive})`,
+        snap
       );
     }
   });
   liveMonitor.start();
+}
+
+/**
+ * Suspend the camera-disconnect monitor while a flow that legitimately owns
+ * the camera is running (RC's Choose Camera / Choose Screen selection UI,
+ * whose preview streams open, close, and swap cameras). Nestable; the
+ * monitor is re-armed on the current stream once every suspend is released.
+ */
+webgazer.suspendCameraMonitor = function () {
+  console.log('[CameraReconnect] suspendCameraMonitor — selection UI owns the camera');
+  if (liveMonitor) liveMonitor.suspend();
+  return webgazer;
+};
+
+/** Release one suspendCameraMonitor(); re-arms at depth 0. */
+webgazer.resumeCameraMonitor = function () {
+  console.log('[CameraReconnect] resumeCameraMonitor — selection UI released the camera');
+  if (liveMonitor) liveMonitor.unsuspend();
+  return webgazer;
+};
+
+/**
+ * Reason object for a participant Quit on the camera reconnect popup.
+ * Snapshot is trimmed to the fields consumers log (status, trackReadyState,
+ * streamActive); null when the monitor fired without a snapshot.
+ */
+export function buildCameraReconnectQuitReason(snap, cameraLabel, resumeAttempts) {
+  return {
+    trigger: 'cameraReconnectPopup',
+    snapshot: snap
+      ? {
+          status: snap.status,
+          trackReadyState: snap.trackReadyState,
+          streamActive: snap.streamActive
+        }
+      : null,
+    cameraLabel: cameraLabel || '',
+    resumeAttempts: resumeAttempts || 0,
+    quitAfterFailedResume: (resumeAttempts || 0) > 0
+  };
 }
 
 //PRIVATE FUNCTIONS
@@ -2483,7 +2525,7 @@ async function _tryReconnectOriginalCamera() {
   return true;
 }
 
-async function showCameraReconnectionPopup(message) {
+async function showCameraReconnectionPopup(message, snap = null) {
   console.log('[CameraReconnect] showCameraReconnectionPopup called, _isReconnecting:', _isReconnecting);
   if (_isReconnecting) {
     console.log('[CameraReconnect] showCameraReconnectionPopup BLOCKED — already reconnecting');
@@ -2496,9 +2538,10 @@ async function showCameraReconnectionPopup(message) {
   const cameraToReconnect = webgazer.params.activeCamera?.label || webgazer.params.activeCamera?.id || 'unknown';
   console.warn("Camera paused:", message);
   console.log('[CameraReconnect] Camera to reconnect:', cameraToReconnect);
+  let resumeAttempts = 0;
 
   if (typeof webgazer.onCameraDisconnected === 'function') {
-    webgazer.onCameraDisconnected(message);
+    webgazer.onCameraDisconnected(message, snap);
   }
 
   // Hide the EasyEyes panel and snapshot the current page so the
@@ -2539,7 +2582,8 @@ async function showCameraReconnectionPopup(message) {
   if (!result.isConfirmed) {
     console.log('[CameraReconnect] Quit button pressed');
     _restorePageContrast();
-    if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
+    if (typeof webgazer.onQuit === 'function')
+      webgazer.onQuit(buildCameraReconnectQuitReason(snap, cameraToReconnect, resumeAttempts));
     _isReconnecting = false;
     return;
   }
@@ -2617,6 +2661,7 @@ async function showCameraReconnectionPopup(message) {
       break;
     }
 
+    resumeAttempts++;
     const cameraLabel = webgazer.params.activeCamera?.label || '';
     const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
     const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
@@ -2647,7 +2692,8 @@ async function showCameraReconnectionPopup(message) {
     if (!retryResult.isConfirmed) {
       console.log('[CameraReconnect] Quit button pressed');
       _restorePageContrast();
-      if (typeof webgazer.onQuit === 'function') webgazer.onQuit();
+      if (typeof webgazer.onQuit === 'function')
+        webgazer.onQuit(buildCameraReconnectQuitReason(snap, cameraToReconnect, resumeAttempts));
       break;
     }
     console.log('[CameraReconnect] Retrying camera reconnection');
@@ -2686,7 +2732,9 @@ webgazer.setOnCameraReconnected = function(callback) {
 
 /**
  * Set a callback for when the participant clicks Quit on the camera reconnect popup.
- * @param {Function} callback - Function to call when quit is requested
+ * @param {Function} callback - Function to call when quit is requested; receives
+ *   a reason object ({trigger, snapshot, cameraLabel, resumeAttempts,
+ *   quitAfterFailedResume}) so the consumer can log what failed.
  * @return {webgazer} this
  */
 webgazer.setOnQuit = function(callback) {

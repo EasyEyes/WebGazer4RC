@@ -19,6 +19,11 @@ export class VideoLiveMonitor {
       this._graceUntil = 0;
       this._consecutiveBadCount = 0;
       this._tickCount = 0;
+      // > 0 while an external flow (e.g. RC's camera-selection UI) owns the
+      // camera. While suspended the monitor neither polls nor listens, so
+      // RC's own stream churn (previews, swaps, teardown) can't read as a
+      // participant-side disconnect. Pairs with suspend()/unsuspend().
+      this._suspended = 0;
   
       // bind handlers
       //
@@ -52,6 +57,10 @@ export class VideoLiveMonitor {
         console.warn(LOG_PREFIX, 'start() called but no track available');
         return;
       }
+      if (this._suspended > 0) {
+        console.log(LOG_PREFIX, `start() skipped — suspended (depth ${this._suspended})`);
+        return;
+      }
       console.log(LOG_PREFIX, 'start() — attaching listeners, pollMs:', this.pollMs, 'graceUntil:', this._graceUntil > 0 ? `${Math.round((this._graceUntil - Date.now()) / 1000)}s remaining` : 'none');
   
       this.track.addEventListener("ended", this._onEnded, { once: false });
@@ -75,6 +84,26 @@ export class VideoLiveMonitor {
       console.log(LOG_PREFIX, 'pause() — stopping polling and detaching listeners');
       if (this._tickId) { clearTimeout(this._tickId); this._tickId = null; }
       this._detachTrackListeners();
+    }
+
+    /**
+     * Suspend disconnect detection while another flow owns the camera
+     * (RC's Choose Camera / Choose Screen popups open and close their own
+     * preview streams and swap cameras). Nestable; unsuspend() re-arms on
+     * the current stream with a fresh grace period once the depth hits 0.
+     */
+    suspend() {
+      this._suspended++;
+      console.log(LOG_PREFIX, `suspend() — depth ${this._suspended}`);
+      this.pause();
+    }
+
+    unsuspend() {
+      if (this._suspended > 0) this._suspended--;
+      console.log(LOG_PREFIX, `unsuspend() — depth ${this._suspended}`);
+      if (this._suspended === 0 && this.stream && this.track) {
+        this.updateStream(this.stream, this.video);
+      }
     }
 
     stop() {
