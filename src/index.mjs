@@ -2318,7 +2318,7 @@ const RC_SNAPSHOT_ID = 'rc-reconnect-page-snapshot';
  *  3. Place the clones in a full-viewport white overlay so the
  *     participant sees the correct page dimmed behind the popup.
  */
-function _prepareReconnectOverlay() {
+export function _prepareReconnectOverlay() {
   _cleanupReconnectOverlay();
 
   // Hide the EasyEyes calibration panel — save its display so we
@@ -2398,6 +2398,21 @@ function _prepareReconnectOverlay() {
     clone.style.pointerEvents = 'none';
     wrapper.appendChild(clone);
     hasContent = true;
+  }
+
+  // The owning Swal's willClose is supposed to remove this wrapper, but
+  // its timing is not synchronously guaranteed (same hazard as the
+  // bottom-row previews removed above). The clone above keeps the visual;
+  // drop the REAL one so the participant is never left with a
+  // live-streaming box eating clicks over the experiment.
+  const realWrapper = document.getElementById('rc-resolution-video-wrapper');
+  if (realWrapper) {
+    realWrapper.querySelectorAll('video').forEach(v => {
+      try {
+        v.srcObject = null;
+      } catch (_) {}
+    });
+    realWrapper.remove();
   }
 
   if (!hasContent) { wrapper.remove(); return; }
