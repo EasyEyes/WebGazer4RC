@@ -16,6 +16,7 @@ import ridgeRegThreaded from "./ridgeRegThreaded.mjs";
 import util from "./util.mjs";
 import { VideoLiveMonitor } from './videoLiveMonitor.mjs';
 import Swal from 'sweetalert2';
+import { createRecoveryLifecycle } from './recoveryLifecycle.mjs';
 
 function sleep(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
@@ -2533,145 +2534,38 @@ async function showCameraReconnectionPopup(message, snap = null) {
   }
   _isReconnecting = true;
 
-  if (liveMonitor) liveMonitor.pause();
+  const recoveryInteraction = createRecoveryLifecycle(webgazer.onRecoveryInteraction);
+  let recoveryOutcome = 'completed';
+  try {
+    if (liveMonitor) liveMonitor.pause();
 
-  const cameraToReconnect = webgazer.params.activeCamera?.label || webgazer.params.activeCamera?.id || 'unknown';
-  console.warn("Camera paused:", message);
-  console.log('[CameraReconnect] Camera to reconnect:', cameraToReconnect);
-  let resumeAttempts = 0;
+    const cameraToReconnect = webgazer.params.activeCamera?.label || webgazer.params.activeCamera?.id || 'unknown';
+    console.warn("Camera paused:", message);
+    console.log('[CameraReconnect] Camera to reconnect:', cameraToReconnect);
+    let resumeAttempts = 0;
 
-  if (typeof webgazer.onCameraDisconnected === 'function') {
-    webgazer.onCameraDisconnected(message, snap);
-  }
-
-  // Hide the EasyEyes panel and snapshot the current page so the
-  // participant sees the correct background (dimmed) behind the
-  // reconnection popup instead of the calibration panel.
-  _prepareReconnectOverlay();
-
-  // Close any existing Swal so its willClose handler runs and cleans up.
-  // The overlay already captured the visual state, so losing the Swal is fine.
-  Swal.close();
-
-  _dimPageContent();
-
-  const titleText = _getPhrase('RC_CameraReconnectTitle');
-  const resumeText = _getPhrase('RC_Proceed');
-  const quitText = _getPhrase('RC_Quit');
-
-  const result = await Swal.fire({
-    icon: undefined,
-    title: titleText,
-    showConfirmButton: true,
-    showCancelButton: true,
-    confirmButtonText: resumeText,
-    cancelButtonText: quitText,
-    allowEscapeKey: false,
-    allowOutsideClick: false,
-    backdrop: 'rgba(0,0,0,0)',
-    reverseButtons: false,
-    customClass: {
-      container: 'camera-reconnect-container',
-      popup: 'camera-reconnection-popup',
-      confirmButton: 'swal2-confirm-resume',
-      cancelButton: 'swal2-cancel-quit',
-    },
-    didOpen: _styleReconnectSwal,
-  });
-
-  if (!result.isConfirmed) {
-    console.log('[CameraReconnect] Quit button pressed');
-    _restorePageContrast();
-    if (typeof webgazer.onQuit === 'function')
-      webgazer.onQuit(buildCameraReconnectQuitReason(snap, cameraToReconnect, resumeAttempts));
-    _isReconnecting = false;
-    return;
-  }
-
-  // Retry loop: try to reconnect, and if the camera is still missing,
-  // always show the "Sorry. Can't find ..." page (never go back to
-  // the initial "To save power ..." page).
-  //
-  // Build the spinner text from the i18n phrase
-  // RC_CameraReconnecting = "Reconnecting camera at [[RRR]] ..."
-  // where [[RRR]] is replaced with the previous camera mode in the form
-  // "WIDTH × HEIGHT, FRAMERATE Hz" (integers, e.g. "640 × 480, 15 Hz").
-  // If we have no previous resolution/Hz info we drop the " at [[RRR]]"
-  // segment entirely.
-  const prevReport = webgazer.videoParamsToReport || {};
-  const haveRes = prevReport.width && prevReport.height;
-  const haveHz = !!prevReport.frameRate;
-  const rrrText = (haveRes && haveHz)
-    ? `${Math.round(prevReport.width)} \u00d7 ${Math.round(prevReport.height)}, ${Math.round(prevReport.frameRate)} Hz`
-    : '';
-
-  const reconnectingTemplate = _getPhrase('RC_CameraReconnecting')
-    || 'Reconnecting camera at [[RRR]] ...';
-
-  let spinnerDetail;
-  if (rrrText) {
-    spinnerDetail = reconnectingTemplate.replace(/\[\[RRR\]\]/gi, rrrText);
-  } else {
-    // Drop " at [[RRR]]" (with the leading space and any surrounding
-    // whitespace) when we have no resolution info, so the message reads
-    // naturally as "Reconnecting camera ...".
-    spinnerDetail = reconnectingTemplate
-      .replace(/\s*at\s*\[\[RRR\]\]/gi, '')
-      .replace(/\[\[RRR\]\]/gi, '');
-  }
-
-  while (true) {
-    const isRTLNow = _isRTL();
-    const spinnerDir = isRTLNow ? 'rtl' : 'ltr';
-    Swal.fire({
-      title: undefined,
-      html: `<p dir="${spinnerDir}" style="margin: 0.5rem 0; line-height: 1.6; font-size: 0.95rem; color: #555; text-align: center; direction: ${spinnerDir};">${spinnerDetail}</p>`,
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      showConfirmButton: false,
-      backdrop: 'rgba(0,0,0,0)',
-      customClass: {
-        container: 'camera-reconnect-container',
-      },
-      didOpen: () => {
-        _makeSwalBackdropTransparent();
-        const popup = Swal.getPopup();
-        if (popup) popup.dir = spinnerDir;
-        Swal.showLoading();
-      },
-    });
-
-    const spinnerStart = performance.now();
-    let reconnected = false;
-    try {
-      reconnected = await _tryReconnectOriginalCamera();
-    } catch (error) {
-      console.error('[CameraReconnect] Failed to reconnect camera:', error);
+    if (typeof webgazer.onCameraDisconnected === 'function') {
+      webgazer.onCameraDisconnected(message, snap);
     }
 
-    if (reconnected) {
-      const elapsed = performance.now() - spinnerStart;
-      const MIN_SPINNER_MS = 2000;
-      if (elapsed < MIN_SPINNER_MS) {
-        await new Promise(r => setTimeout(r, MIN_SPINNER_MS - elapsed));
-      }
-      console.log('[CameraReconnect] Successfully reconnected original camera');
-      _restorePageContrast();
-      Swal.close();
-      break;
-    }
+    // Hide the EasyEyes panel and snapshot the current page so the
+    // participant sees the correct background (dimmed) behind the
+    // reconnection popup instead of the calibration panel.
+    _prepareReconnectOverlay();
 
-    resumeAttempts++;
-    const cameraLabel = webgazer.params.activeCamera?.label || '';
-    const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
-    const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
-    const isRTLRetry = _isRTL();
-    const retryDir = isRTLRetry ? 'rtl' : 'ltr';
+    // Close any existing Swal so its willClose handler runs and cleans up.
+    // The overlay already captured the visual state, so losing the Swal is fine.
+    Swal.close();
 
-    const retryResult = await Swal.fire({
+    _dimPageContent();
+
+    const titleText = _getPhrase('RC_CameraReconnectTitle');
+    const resumeText = _getPhrase('RC_Proceed');
+    const quitText = _getPhrase('RC_Quit');
+
+    const result = await Swal.fire({
       icon: undefined,
       title: titleText,
-      html: `<p dir="${retryDir}" style="margin: 0.5rem 0; line-height: 1.6; text-align: center; direction: ${retryDir};">${cantFindText}</p>`,
       showConfirmButton: true,
       showCancelButton: true,
       confirmButtonText: resumeText,
@@ -2687,21 +2581,151 @@ async function showCameraReconnectionPopup(message, snap = null) {
         cancelButton: 'swal2-cancel-quit',
       },
       didOpen: _styleReconnectSwal,
+      didDestroy: recoveryInteraction.watchView(),
     });
 
-    if (!retryResult.isConfirmed) {
+    if (!result.isConfirmed) {
       console.log('[CameraReconnect] Quit button pressed');
       _restorePageContrast();
       if (typeof webgazer.onQuit === 'function')
         webgazer.onQuit(buildCameraReconnectQuitReason(snap, cameraToReconnect, resumeAttempts));
-      break;
+      _isReconnecting = false;
+      recoveryInteraction.finish('cancelled');
+      return;
     }
-    console.log('[CameraReconnect] Retrying camera reconnection');
-  }
 
-  console.log('[CameraReconnect] showCameraReconnectionPopup DONE — setting _isReconnecting = false');
-  _isReconnecting = false;
+    // Retry loop: try to reconnect, and if the camera is still missing,
+    // always show the "Sorry. Can't find ..." page (never go back to
+    // the initial "To save power ..." page).
+    //
+    // Build the spinner text from the i18n phrase
+    // RC_CameraReconnecting = "Reconnecting camera at [[RRR]] ..."
+    // where [[RRR]] is replaced with the previous camera mode in the form
+    // "WIDTH × HEIGHT, FRAMERATE Hz" (integers, e.g. "640 × 480, 15 Hz").
+    // If we have no previous resolution/Hz info we drop the " at [[RRR]]"
+    // segment entirely.
+    const prevReport = webgazer.videoParamsToReport || {};
+    const haveRes = prevReport.width && prevReport.height;
+    const haveHz = !!prevReport.frameRate;
+    const rrrText = (haveRes && haveHz)
+      ? `${Math.round(prevReport.width)} \u00d7 ${Math.round(prevReport.height)}, ${Math.round(prevReport.frameRate)} Hz`
+      : '';
+
+    const reconnectingTemplate = _getPhrase('RC_CameraReconnecting')
+      || 'Reconnecting camera at [[RRR]] ...';
+
+    let spinnerDetail;
+    if (rrrText) {
+      spinnerDetail = reconnectingTemplate.replace(/\[\[RRR\]\]/gi, rrrText);
+    } else {
+      // Drop " at [[RRR]]" (with the leading space and any surrounding
+      // whitespace) when we have no resolution info, so the message reads
+      // naturally as "Reconnecting camera ...".
+      spinnerDetail = reconnectingTemplate
+        .replace(/\s*at\s*\[\[RRR\]\]/gi, '')
+        .replace(/\[\[RRR\]\]/gi, '');
+    }
+
+    while (true) {
+      recoveryInteraction.phase('attempting');
+      const isRTLNow = _isRTL();
+      const spinnerDir = isRTLNow ? 'rtl' : 'ltr';
+      Swal.fire({
+        title: undefined,
+        html: `<p dir="${spinnerDir}" style="margin: 0.5rem 0; line-height: 1.6; font-size: 0.95rem; color: #555; text-align: center; direction: ${spinnerDir};">${spinnerDetail}</p>`,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        showConfirmButton: false,
+        backdrop: 'rgba(0,0,0,0)',
+        customClass: {
+          container: 'camera-reconnect-container',
+        },
+        didOpen: () => {
+          _makeSwalBackdropTransparent();
+          const popup = Swal.getPopup();
+          if (popup) popup.dir = spinnerDir;
+          Swal.showLoading();
+        },
+        didDestroy: recoveryInteraction.watchView(),
+      });
+
+      const spinnerStart = performance.now();
+      let reconnected = false;
+      try {
+        reconnected = await _tryReconnectOriginalCamera();
+      } catch (error) {
+        console.error('[CameraReconnect] Failed to reconnect camera:', error);
+      }
+
+      if (reconnected) {
+        recoveryInteraction.phase('settling');
+        const elapsed = performance.now() - spinnerStart;
+        const MIN_SPINNER_MS = 2000;
+        if (elapsed < MIN_SPINNER_MS) {
+          await new Promise(r => setTimeout(r, MIN_SPINNER_MS - elapsed));
+        }
+        console.log('[CameraReconnect] Successfully reconnected original camera');
+        _restorePageContrast();
+        Swal.close();
+        recoveryOutcome = 'completed';
+        break;
+      }
+
+      resumeAttempts++;
+      recoveryInteraction.phase('retry');
+      const cameraLabel = webgazer.params.activeCamera?.label || '';
+      const cantFindTemplate = _getPhrase('RC_CameraReconnectCantFindIt');
+      const cantFindText = cantFindTemplate.replace(/\[\[xxx\]\]/gi, `"${cameraLabel}"`);
+      const isRTLRetry = _isRTL();
+      const retryDir = isRTLRetry ? 'rtl' : 'ltr';
+
+      const retryResult = await Swal.fire({
+        icon: undefined,
+        title: titleText,
+        html: `<p dir="${retryDir}" style="margin: 0.5rem 0; line-height: 1.6; text-align: center; direction: ${retryDir};">${cantFindText}</p>`,
+        showConfirmButton: true,
+        showCancelButton: true,
+        confirmButtonText: resumeText,
+        cancelButtonText: quitText,
+        allowEscapeKey: false,
+        allowOutsideClick: false,
+        backdrop: 'rgba(0,0,0,0)',
+        reverseButtons: false,
+        customClass: {
+          container: 'camera-reconnect-container',
+          popup: 'camera-reconnection-popup',
+          confirmButton: 'swal2-confirm-resume',
+          cancelButton: 'swal2-cancel-quit',
+        },
+        didOpen: _styleReconnectSwal,
+        didDestroy: recoveryInteraction.watchView(),
+      });
+
+      if (!retryResult.isConfirmed) {
+        console.log('[CameraReconnect] Quit button pressed');
+        _restorePageContrast();
+        if (typeof webgazer.onQuit === 'function')
+          webgazer.onQuit(buildCameraReconnectQuitReason(snap, cameraToReconnect, resumeAttempts));
+        recoveryOutcome = 'cancelled';
+        break;
+      }
+      console.log('[CameraReconnect] Retrying camera reconnection');
+    }
+
+    console.log('[CameraReconnect] showCameraReconnectionPopup DONE — setting _isReconnecting = false');
+    _isReconnecting = false;
+    recoveryInteraction.finish(recoveryOutcome);
+  } catch (error) {
+    recoveryInteraction.finish('failed');
+    throw error;
+  }
 }
+
+// Optional observer only; the existing reconnection callbacks keep their timing.
+webgazer.setOnRecoveryInteraction = function(callback) {
+  webgazer.onRecoveryInteraction = callback;
+  return webgazer;
+};
 
 /**
  * Set a custom callback for camera disconnection events.
