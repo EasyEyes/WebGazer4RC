@@ -1,15 +1,16 @@
 # Security update: 2026-10-23
 
-Node.js 22.23.4 is selected in `.nvmrc` and `engines.node`. This includes the October 21 security patches. Application source behavior is unchanged except for required build integration configuration.
+Pin Node.js 22.23.4 and Bun 1.4.4. Node engines also allow the patched 24.22.1 and 26.12.1 release lines. Update the committed binary Bun lockfile and compatible dependencies, including transitive security patches. The parent project's ignored, untracked npm lockfile is not authoritative and was neither staged nor deleted. CI and setup use Bun; no lockfile approval is needed.
 
-Source: [Node.js October security releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+[Node.js security advisory](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases). [Bun dependency update behavior](https://bun.com/docs/pm/cli/update).
 
 ## Verification and limitations
 
-Node engine/local version updated only. Bun dependency audit reports unresolved findings. Parent remote-calibrator package-manager decision is pending; no lockfile migration was performed.
+Bun frozen installation passes with scripts disabled, and native audit reports no advisories. The parent remote-calibrator integration passes all 143 tests and its production build. No standalone test script is defined.
 
-Dependency audit/remediation incomplete; see verification and blockers below.
+Native Bun audit: **0 critical** findings. 0 package names still have advisories. Remaining findings are deferred for compatibility/reachability review by 2026-10-30 and are not claimed harmless.
 
-## Verification scenario
 
-Use the pinned Node version. Install from the authoritative lockfile with dependency scripts disabled first, review native/postinstall scripts, and run only those required by the package. Run the documented test/build commands. Repeat the native audit before release. In a preview, exercise the package's normal entry point and check browser/server errors. A successful build does not prove production integration.
+## Regression scenario
+
+Use the pinned Node and Bun versions; run `bun install --frozen-lockfile --ignore-scripts` in WebGazer4RC and the parent. Review any blocked scripts before selectively enabling them. Run parent `bun run test` and `bun run build`. In a preview, complete camera permission, face/hand detection and distance calibration, exercise a new-object restart, and confirm gaze output remains finite. The hardware/browser scenario is planned, not executed. Re-run `bun audit` before release.
