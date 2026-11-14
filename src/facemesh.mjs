@@ -20,9 +20,8 @@ const TFFaceMesh = function(refineLandmarks = true) {
   this.model = null;
   this.predictionReady = false;
   this.modelLoaded = false;
+  this._loadPromise = null;
 };
-
-const _modelLoadingInProgress = { current: false, resolves: [], rejects: [] };
 
 const _sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -38,61 +37,48 @@ const _sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
  *
  * The download therefore starts here rather than in the constructor (so the
  * promise always has a handler attached), and is retried before giving up.
+ * Concurrent callers on the same instance join one in-flight download; the
+ * refined and unrefined variants are separate instances and load separately.
  */
-TFFaceMesh.prototype.loadModel = async function() {
-  if (this.modelLoaded) return;
-
-  if (_modelLoadingInProgress.current) {
-    // Join the in-flight load rather than starting a second download.
-    return await new Promise((resolve, reject) => {
-      _modelLoadingInProgress.resolves.push(resolve);
-      _modelLoadingInProgress.rejects.push(reject);
+TFFaceMesh.prototype.loadModel = function() {
+  if (this.modelLoaded) return Promise.resolve();
+  if (!this._loadPromise) {
+    this._loadPromise = this._loadModelWithRetry().finally(() => {
+      this._loadPromise = null;
     });
   }
+  return this._loadPromise;
+};
 
-  _modelLoadingInProgress.current = true;
-
-  try {
-    let lastError;
-    for (let attempt = 1; attempt <= MODEL_LOAD_ATTEMPTS; attempt++) {
-      try {
-        this.model = await faceLandmarksDetection.createDetector(
-          faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
-          _detectorConfig(this.refineLandmarks),
+TFFaceMesh.prototype._loadModelWithRetry = async function() {
+  let lastError;
+  for (let attempt = 1; attempt <= MODEL_LOAD_ATTEMPTS; attempt++) {
+    try {
+      this.model = await faceLandmarksDetection.createDetector(
+        faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+        _detectorConfig(this.refineLandmarks),
+      );
+      useFullRangeModel(this.model);
+      this.modelLoaded = true;
+      return;
+    } catch (err) {
+      lastError = err;
+      this.model = null;
+      if (attempt < MODEL_LOAD_ATTEMPTS) {
+        console.warn(
+          `[TFFaceMesh] Model load attempt ${attempt}/${MODEL_LOAD_ATTEMPTS} failed, retrying in ${MODEL_LOAD_RETRY_DELAY_MS}ms:`,
+          err?.message || err,
         );
-        useFullRangeModel(this.model);
-        this.modelLoaded = true;
-        lastError = null;
-        break;
-      } catch (err) {
-        lastError = err;
-        this.model = null;
-        if (attempt < MODEL_LOAD_ATTEMPTS) {
-          console.warn(
-            `[TFFaceMesh] Model load attempt ${attempt}/${MODEL_LOAD_ATTEMPTS} failed, retrying in ${MODEL_LOAD_RETRY_DELAY_MS}ms:`,
-            err?.message || err,
-          );
-          await _sleep(MODEL_LOAD_RETRY_DELAY_MS);
-        }
+        await _sleep(MODEL_LOAD_RETRY_DELAY_MS);
       }
     }
-
-    if (lastError) {
-      console.error(
-        `[TFFaceMesh] Model load failed after ${MODEL_LOAD_ATTEMPTS} attempts.`,
-        'Check that the models/ folder is reachable from the page URL.',
-        lastError,
-      );
-      _modelLoadingInProgress.rejects.forEach(reject => reject(lastError));
-      throw lastError;
-    }
-
-    _modelLoadingInProgress.resolves.forEach(resolve => resolve());
-  } finally {
-    _modelLoadingInProgress.current = false;
-    _modelLoadingInProgress.resolves = [];
-    _modelLoadingInProgress.rejects = [];
   }
+  console.error(
+    `[TFFaceMesh] Model load failed after ${MODEL_LOAD_ATTEMPTS} attempts.`,
+    'Check that the models/ folder is reachable from the page URL.',
+    lastError,
+  );
+  throw lastError;
 };
 
 // Global variable for face landmark positions array

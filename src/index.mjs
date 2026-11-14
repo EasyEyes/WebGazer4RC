@@ -615,6 +615,15 @@ var curTrackerMap = {
     return new webgazer.tracker.TFFaceMesh(false);
   },
 };
+
+// One instance per tracker name, so a model preloaded early (or loaded
+// before a setTracker switch) is reused instead of downloaded again.
+var trackerInstances = { TFFacemesh: curTracker };
+
+const _getTrackerInstance = (name) => {
+  if (!trackerInstances[name]) trackerInstances[name] = curTrackerMap[name]();
+  return trackerInstances[name];
+};
 var regressionMap = {
   ridge: function () {
     return new webgazer.reg.RidgeReg();
@@ -2875,9 +2884,21 @@ webgazer.setTracker = async function (name) {
     }
     return webgazer;
   }
-  curTracker = curTrackerMap[name]();
+  curTracker = _getTrackerInstance(name);
   await curTracker.loadModel();
   return webgazer;
+};
+
+/**
+ * Download and initialize a tracker's model without switching to it.
+ * A later setTracker(name) reuses the loaded instance.
+ * @param {String} name - tracker name, e.g. 'TFFacemesh'
+ * @return {Promise} resolves once the model is ready
+ */
+webgazer.preloadTracker = function (name) {
+  if (curTrackerMap[name] === undefined)
+    return Promise.reject(new Error(`Unknown tracker: ${name}`));
+  return _getTrackerInstance(name).loadModel();
 };
 
 /**
@@ -2910,6 +2931,7 @@ webgazer.addTrackerModule = function (name, constructor) {
   curTrackerMap[name] = function () {
     return new constructor();
   };
+  delete trackerInstances[name];
 };
 
 /**
