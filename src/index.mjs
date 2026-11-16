@@ -946,7 +946,9 @@ async function gazePrep(forcedPrep = false) {
   );
 
   // [20200617 xk] TODO: this call should be made async somehow. will take some work.
-  if (!webgazer.params.paused || forcedPrep) {
+  // The loop must not start the model download itself (getEyePatches would),
+  // so frames are skipped until something else has loaded it.
+  if ((!webgazer.params.paused || forcedPrep) && curTracker.modelLoaded) {
     latestEyeFeatures = await getPupilFeatures(
       videoElementCanvas,
       videoElementCanvas.width,
@@ -1348,9 +1350,12 @@ async function init(initMode = "all", stream) {
     clockStart = performance.now();
   }
 
-  // load the distance model
-  await curTracker.loadModel();
-  _throwIfStartupAborted();
+  // Video-only startup just connects the camera; the face model is loaded
+  // by whoever needs it (RC preloads it, tracking requires it).
+  if (initMode !== "video") {
+    await curTracker.loadModel();
+    _throwIfStartupAborted();
+  }
   await loop();
 }
 
